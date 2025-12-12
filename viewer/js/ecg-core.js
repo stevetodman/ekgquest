@@ -1,5 +1,7 @@
 // Shared ECG utilities: schema normalization, integrity checks, detection, and measurements.
 
+export const ECG_SCHEMA_VERSION = 1;
+
 export function clamp(x, a, b) {
   return Math.max(a, Math.min(b, x));
 }
@@ -50,6 +52,13 @@ export function normalizeECGData(raw) {
   if (!raw) throw new Error("ECG payload is empty");
   if (!raw.fs) throw new Error("ECG payload missing fs");
 
+  const rawVersion = raw.schema_version ?? raw.schemaVersion ?? 0;
+  let schema_version = Number(rawVersion);
+  if (!Number.isFinite(schema_version) || schema_version <= 0) schema_version = ECG_SCHEMA_VERSION;
+  if (schema_version !== ECG_SCHEMA_VERSION) {
+    throw new Error(`Unsupported schema_version ${schema_version} (expected ${ECG_SCHEMA_VERSION})`);
+  }
+
   const leadsRaw = raw.leads_uV || raw.leads;
   if (!leadsRaw || Object.keys(leadsRaw).length === 0) {
     throw new Error("ECG payload missing leads");
@@ -71,12 +80,46 @@ export function normalizeECGData(raw) {
   const duration_s = raw.duration_s ?? (refLen && fs ? refLen / fs : null);
 
   return {
+    schema_version,
     fs,
     duration_s,
     leads_uV,
     targets: raw.targets || {},
     integrity: raw.integrity || {},
   };
+}
+
+export function validateECGData(meta) {
+  const errors = [];
+  const warnings = [];
+
+  if (!meta) {
+    errors.push("ECG meta is missing");
+    return { errors, warnings };
+  }
+  if (meta.schema_version !== ECG_SCHEMA_VERSION) {
+    errors.push(`Unsupported schema_version ${meta.schema_version}`);
+  }
+  if (!Number.isFinite(meta.fs) || meta.fs <= 0) errors.push("Invalid fs");
+  if (!meta.leads_uV || typeof meta.leads_uV !== "object") errors.push("Missing leads_uV");
+
+  const leadNames = meta.leads_uV ? Object.keys(meta.leads_uV) : [];
+  if (leadNames.length === 0) errors.push("No leads present");
+  if (meta.leads_uV && !meta.leads_uV.II) warnings.push("Missing lead II (limits R-peak detection)");
+
+  if (Number.isFinite(meta.duration_s) && meta.duration_s <= 0) warnings.push("Non-positive duration_s");
+  if (meta.fs && meta.leads_uV && meta.leads_uV.I) {
+    const inferred = meta.leads_uV.I.length / meta.fs;
+    if (meta.duration_s != null && Math.abs(meta.duration_s - inferred) > 0.05) {
+      warnings.push("duration_s does not match sample count");
+    }
+  }
+
+  const limbRequired = ["I", "II", "III", "aVR", "aVL", "aVF"];
+  const missingLimb = limbRequired.filter((k) => !meta.leads_uV || !meta.leads_uV[k]);
+  if (missingLimb.length) warnings.push(`Missing limb leads: ${missingLimb.join(", ")}`);
+
+  return { errors, warnings };
 }
 
 export async function fetchECG(url) {
@@ -90,6 +133,10 @@ export async function fetchECG(url) {
 
 // Einthoven and augmented-lead consistency checks.
 export function physicsChecks(L) {
+  const required = ["I", "II", "III", "aVR", "aVL", "aVF"];
+  const missing = required.filter((k) => !L || !L[k]);
+  if (missing.length) return { missing_leads: missing };
+
   const n = L.I.length;
   let maxE = 0,
     maxAVR = 0,

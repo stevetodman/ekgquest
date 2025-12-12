@@ -1,7 +1,9 @@
 import assert from "assert";
 import fs from "fs/promises";
 import {
+  ECG_SCHEMA_VERSION,
   normalizeECGData,
+  validateECGData,
   physicsChecks,
   detectRPeaks,
   buildMedianBeat,
@@ -16,6 +18,10 @@ async function load(relativePath) {
 }
 
 async function smoke(meta) {
+  assert.strictEqual(meta.schema_version, ECG_SCHEMA_VERSION);
+  const validation = validateECGData(meta);
+  assert.deepStrictEqual(validation.errors, []);
+
   const integrity = physicsChecks(meta.leads_uV);
   Object.values(integrity).forEach((v) => assert.ok(Number.isFinite(v)));
 

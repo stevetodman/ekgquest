@@ -151,6 +151,7 @@
 
 <script type="module">
 import {
+  ECG_SCHEMA_VERSION,
   clamp, lerp, medianOfSmallArray, medianWindow, mean,
   fmtMs, fmtBpm, fmtDeg,
   physicsChecks, detectRPeaks,
@@ -493,6 +494,7 @@ function synthECG(ageY, dx, seed, enableNoise, enableFilters){
   };
 
   return {
+    schema_version: ECG_SCHEMA_VERSION,
     fs, duration_s:duration,
     targets:{
       age_years: ageY, dx,

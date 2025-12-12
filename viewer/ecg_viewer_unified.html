@@ -137,12 +137,6 @@
 import {
   fetchECG,
   normalizeECGData,
-  physicsChecks,
-  detectRPeaks,
-  buildMedianBeat,
-  fiducialsFromMedian,
-  buildFullFiducialsFromMedian,
-  computeGlobalMeasurements,
   fmtMs, fmtBpm, fmtDeg,
 } from "./js/ecg-core.js";
 
@@ -189,6 +183,68 @@ let calipers = false;
 let pts = [];
 let patientId = `P-${Math.floor(Math.random()*90000+10000)}`;
 let recordedAt = new Date();
+
+let analysisWorker = null;
+let analysisSeq = 0;
+let activeAnalysisId = 0;
+
+function ensureAnalysisWorker(){
+  if(analysisWorker) return analysisWorker;
+  try{
+    analysisWorker = new Worker(new URL("./js/ecg-worker.js", import.meta.url), { type:"module" });
+    analysisWorker.onmessage = (evt)=>{
+      const msg = evt.data || {};
+      if(msg.id !== activeAnalysisId) return; // ignore stale
+      if(!msg.ok){
+        ANALYSIS = null;
+        elFooter.textContent = `Analysis failed: ${msg.error || "unknown error"}`;
+        return;
+      }
+      const r = msg.result;
+      META.integrity = { ...(r.integrity || {}), ...(META.integrity || {}) };
+      ANALYSIS = {
+        rPeaks: r.rPeaks,
+        medBeat: r.medBeat,
+        medFids: r.medianFiducials,
+        medFull: r.fiducials,
+        measures: r.measures,
+        warnings: r.warnings || [],
+        errors: r.errors || [],
+      };
+      updateMetrics();
+      draw();
+      if(ANALYSIS.errors.length){
+        elFooter.textContent = `Validation errors: ${ANALYSIS.errors.join(" • ")}`;
+      } else if(ANALYSIS.warnings.length){
+        elFooter.textContent = `Warnings: ${ANALYSIS.warnings.join(" • ")}`;
+      } else {
+        elFooter.textContent = "";
+      }
+    };
+    analysisWorker.onerror = (err)=>{
+      ANALYSIS = null;
+      elFooter.textContent = `Worker error: ${err?.message || err}`;
+    };
+  }catch(err){
+    analysisWorker = null;
+    elFooter.textContent = `Worker unavailable: ${err?.message || err}`;
+  }
+  return analysisWorker;
+}
+
+function requestAnalysis(meta){
+  const w = ensureAnalysisWorker();
+  if(!w){
+    ANALYSIS = null;
+    updateMetrics();
+    return;
+  }
+  const id = ++analysisSeq;
+  activeAnalysisId = id;
+  ANALYSIS = null;
+  updateMetrics();
+  w.postMessage({ id, type:"analyze", payload: meta });
+}
 
 function resizeCanvas(){
   const cssW = canvas.clientWidth || 1200;
@@ -367,7 +423,21 @@ function draw(){
 }
 
 function updateMetrics(){
-  if(!ANALYSIS){
+  const t = META?.targets || {};
+  elMhTitle.textContent = t.dx || "ECG";
+  elMhPatient.textContent = `Patient: ${patientId}`;
+  const age = t.age_years!=null ? `${t.age_years}y` : "—";
+  const sex = t.sex || "—";
+  const hrTarget = t.HR_bpm ? `${t.HR_bpm} bpm` : "—";
+  elMhMeta.textContent = `Age: ${age} • Sex: ${sex} • HR target: ${hrTarget}`;
+  elMhWhen.textContent = `Recorded: ${recordedAt.toLocaleString()}`;
+
+  const integ = META?.integrity || {};
+  const ein = integ.einthoven_max_abs_error_uV;
+  elInt.textContent = (ein!=null) ? `Einthoven err ≤ ${ein} µV` : "Integrity unknown";
+  elInt.style.color = (ein!=null && ein < 50) ? "var(--ok)" : "var(--warn)";
+
+  if(!ANALYSIS || !ANALYSIS.measures){
     elHr.textContent=elPR.textContent=elQRS.textContent=elQT.textContent=elAxes.textContent=elBeats.textContent="—";
     return;
   }
@@ -381,41 +451,14 @@ function updateMetrics(){
     : "—";
   const beatsUsed = (ANALYSIS.medBeat && ANALYSIS.medBeat.beatsUsed) || "—";
   elBeats.textContent = beatsUsed;
-
-  const integ = META.integrity || {};
-  const ein = integ.einthoven_max_abs_error_uV;
-  elInt.textContent = (ein!=null) ? `Einthoven err ≤ ${ein} µV` : "Integrity unknown";
-  elInt.style.color = (ein!=null && ein < 50) ? "var(--ok)" : "var(--warn)";
-
-  const t = META.targets || {};
-  elMhTitle.textContent = t.dx || "Synthetic pediatric ECG";
-  elMhPatient.textContent = `Patient: ${patientId}`;
-  const age = t.age_years!=null ? `${t.age_years}y` : "—";
-  const sex = t.sex || "—";
-  const hrTarget = t.HR_bpm ? `${t.HR_bpm} bpm` : "—";
-  elMhMeta.textContent = `Age: ${age} • Sex: ${sex} • HR target: ${hrTarget}`;
-  elMhWhen.textContent = `Recorded: ${recordedAt.toLocaleString()}`;
-}
-
-function analyze(meta){
-  const rPeaks = detectRPeaks(meta);
-  const medBeat = buildMedianBeat(meta, rPeaks);
-  let medFids = null, medFull=null, measures=null;
-  if(medBeat && medBeat.ok){
-    medFids = fiducialsFromMedian(medBeat, meta.duration_s ? meta.duration_s/(rPeaks.length||1) : undefined);
-    medFull = buildFullFiducialsFromMedian(meta, rPeaks, medFids);
-    measures = computeGlobalMeasurements(meta, rPeaks, medBeat, medFids);
-  }
-  return { rPeaks, medBeat, medFids, medFull, measures };
 }
 
 async function loadSample(url){
   elInfo.textContent = "Loading…";
   const meta = await fetchECG(url);
-  meta.integrity = { ...physicsChecks(meta.leads_uV), ...meta.integrity };
   META = meta;
   recordedAt = new Date();
-  ANALYSIS = analyze(META);
+  requestAnalysis(META);
   updateMetrics();
   draw();
 }
@@ -426,10 +469,9 @@ function loadFromFile(file){
     try{
       const raw = JSON.parse(reader.result);
       const meta = normalizeECGData(raw);
-      meta.integrity = { ...physicsChecks(meta.leads_uV), ...meta.integrity };
       META = meta;
       recordedAt = new Date();
-      ANALYSIS = analyze(META);
+      requestAnalysis(META);
       updateMetrics();
       draw();
       elInfo.textContent = `Loaded ${file.name}`;

@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "world-class sample",
+      "path": "../data/ecg_data_v5_world_class.json",
+      "expect": {
+        "rPeaks": 15,
+        "hr_bpm": 99.8929718159,
+        "qrs_ms": 64
+      }
+    },
+    {
+      "name": "basic sample",
+      "path": "../data/ecg_data.json",
+      "expect": {
+        "rPeaks": 16,
+        "hr_bpm": 100.0,
+        "qrs_ms": 103
+      }
+    }
+  ]
+}
