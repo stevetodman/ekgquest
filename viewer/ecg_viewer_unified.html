@@ -55,8 +55,15 @@
     background:var(--panel);border:1px solid var(--border);border-radius:12px;
     padding:10px 12px;margin-bottom:10px;
   }
+  .tag{
+    padding:4px 10px;border-radius:999px;border:1px solid transparent;font-weight:700;font-size:12px;letter-spacing:0.3px;
+  }
+  .tag-synth{background:#ffe4e8;border-color:#f0b6c0;color:#b00020;}
+  .tag-real{background:#e5f7ec;border-color:#b5e1c7;color:#0b6b3b;}
+  .tag-unknown{background:#fff4d6;border-color:#f1d08c;color:#8a5a00;}
   .mh-title{font-weight:700;font-size:16px}
   .mh-field{font-size:12px;color:var(--muted)}
+  .missing-lead{color:#b00020;}
   @media print{
     body{margin:0;background:white;}
     .bar,.masthead{page-break-inside:avoid;box-shadow:none;}
@@ -69,6 +76,7 @@
 
 <div class="masthead">
   <div class="mh-title" id="mhTitle">Synthetic ECG</div>
+  <div class="tag tag-unknown" id="mhSynth">SOURCE UNKNOWN</div>
   <div class="mh-field" id="mhPatient">Patient: —</div>
   <div class="mh-field" id="mhMeta">Age: — • Sex: — • HR target: —</div>
   <div class="mh-field" id="mhWhen">Recorded: —</div>
@@ -171,6 +179,7 @@ const elAxes = document.getElementById("m_axes");
 const elBeats = document.getElementById("m_beats");
 
 const elMhTitle = document.getElementById("mhTitle");
+const elMhSynth = document.getElementById("mhSynth");
 const elMhPatient = document.getElementById("mhPatient");
 const elMhMeta = document.getElementById("mhMeta");
 const elMhWhen = document.getElementById("mhWhen");
@@ -261,6 +270,17 @@ function gain(){ return +elGain.value; }
 function pxPerSec(){ return speed()*pxPerMm(); }
 function pxPerUv(){ return (gain()*pxPerMm())/1000.0; }
 function cssSize(){ return { w: canvas.clientWidth || canvas.width, h: canvas.clientHeight || canvas.height }; }
+function syntheticState(meta){
+  const flag = meta?.targets?.synthetic;
+  if(flag === true) return { label:"SYNTHETIC", cls:"tag-synth", kind:"synthetic" };
+  if(flag === false) return { label:"REAL DATA", cls:"tag-real", kind:"real" };
+  return { label:"SOURCE UNKNOWN", cls:"tag-unknown", kind:"unknown" };
+}
+const synthBadgeStyles = {
+  synthetic:{ bg:"rgba(255,228,232,0.9)", fg:"#b00020", border:"#f0b6c0" },
+  real:{ bg:"rgba(229,247,236,0.9)", fg:"#0b6b3b", border:"#b5e1c7" },
+  unknown:{ bg:"rgba(255,244,214,0.92)", fg:"#8a5a00", border:"#f1d08c" },
+};
 
 function drawGrid(){
   const {w,h} = cssSize();
@@ -288,6 +308,20 @@ function drawCalibration(x0,y0){
   ctx.lineTo(x0+0.2*pxPerSec(), y0-10*p);
   ctx.lineTo(x0+0.2*pxPerSec(), y0);
   ctx.stroke();
+}
+
+function drawMissingLead(lead, baseY, left, width){
+  ctx.save();
+  ctx.strokeStyle="#c74a4a";
+  ctx.setLineDash([6,4]);
+  ctx.beginPath();
+  ctx.moveTo(left, baseY);
+  ctx.lineTo(left + Math.max(60, width - left - 30), baseY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle="#b00020";
+  ctx.fillText(`${lead} missing`, 10, baseY+4);
+  ctx.restore();
 }
 
 function drawFidsOnLead(baseY, left, leadData){
@@ -323,11 +357,19 @@ function drawStacked(){
   const left = 50;
   const top = 40;
   const step = Math.max(1, Math.floor(fs / pps));
+  const {w} = cssSize();
   drawCalibration(left, top + hLead/2);
   let y = top;
   for(const lead of leads15){
     const base = y + hLead/2;
     const data = META.leads_uV[lead];
+    ctx.fillStyle="#444";
+    ctx.fillText(lead, 10, base+4);
+    if(!data){
+      drawMissingLead(lead, base, left, w);
+      y += hLead;
+      continue;
+    }
     ctx.beginPath();
     for(let i=0;i<data.length;i+=step){
       const x = left + (i/fs)*pps;
@@ -336,8 +378,6 @@ function drawStacked(){
     }
     ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--trace");
     ctx.stroke();
-    ctx.fillStyle="#444";
-    ctx.fillText(lead, 10, base+4);
     if(lead==="II") drawFidsOnLead(base, left, data);
     y += hLead;
   }
@@ -363,8 +403,12 @@ function drawPrint12(){
       const x0 = leftPad + c*cellW;
       const y0 = topPad + r*cellH;
       const base = y0 + cellH/2;
-      ctx.beginPath();
       const data = META.leads_uV[lead];
+      if(!data){
+        drawMissingLead(lead, base, x0, x0 + cellW);
+        continue;
+      }
+      ctx.beginPath();
       for(let i=0;i<data.length;i+=step){
         const x = x0 + (i/fs)*pps;
         const y = base - data[i]*ppu;
@@ -381,6 +425,10 @@ function drawPrint12(){
   const right = leftPad + cellW*3;
   const base = topPad + rows*cellH - cellH*0.35;
   const rhythmLead = META.leads_uV.II;
+  if(!rhythmLead){
+    drawMissingLead("II rhythm", base, left, right);
+    return;
+  }
   ctx.beginPath();
   const stepR = Math.max(1, Math.floor(fs / pps));
   for(let i=0;i<rhythmLead.length;i+=stepR){
@@ -413,18 +461,45 @@ function drawCalipers(){
   }
 }
 
+function drawSyntheticBadge(){
+  if(!META) return;
+  const state = syntheticState(META);
+  const style = synthBadgeStyles[state.kind] || synthBadgeStyles.unknown;
+  const {w} = cssSize();
+  ctx.save();
+  ctx.font = "bold 12px system-ui,-apple-system,Segoe UI,Roboto,Arial";
+  const textW = ctx.measureText(state.label).width;
+  const padX = 10, padY = 6;
+  const boxW = textW + padX*2;
+  const boxH = 22;
+  const x = w - boxW - 14;
+  const y = 14;
+  ctx.fillStyle = style.bg;
+  ctx.strokeStyle = style.border;
+  ctx.lineWidth = 1;
+  if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(x,y,boxW,boxH,8); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillRect(x,y,boxW,boxH); ctx.strokeRect(x,y,boxW,boxH); }
+  ctx.fillStyle = style.fg;
+  ctx.fillText(state.label, x + padX, y + boxH - padY);
+  ctx.restore();
+}
+
 function draw(){
   if(!META) return;
   resizeCanvas();
   drawGrid();
   if(elLayout.value==="print12") drawPrint12(); else drawStacked();
   drawCalipers();
+  drawSyntheticBadge();
   elInfo.textContent = `${speed()} mm/s • ${gain()} mm/mV • ${pxPerMm()} px/mm`;
 }
 
 function updateMetrics(){
   const t = META?.targets || {};
   elMhTitle.textContent = t.dx || "ECG";
+  const synth = syntheticState(META);
+  elMhSynth.textContent = synth.label;
+  elMhSynth.className = `tag ${synth.cls}`;
   elMhPatient.textContent = `Patient: ${patientId}`;
   const age = t.age_years!=null ? `${t.age_years}y` : "—";
   const sex = t.sex || "—";
@@ -456,6 +531,7 @@ function updateMetrics(){
 async function loadSample(url){
   elInfo.textContent = "Loading…";
   const meta = await fetchECG(url);
+  meta.targets = { ...(meta.targets || {}), synthetic: meta.targets?.synthetic ?? true };
   META = meta;
   recordedAt = new Date();
   requestAnalysis(META);

@@ -1,6 +1,7 @@
 // Shared ECG utilities: schema normalization, integrity checks, detection, and measurements.
 
 export const ECG_SCHEMA_VERSION = 1;
+const VIEWER_REQUIRED_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"];
 
 export function clamp(x, a, b) {
   return Math.max(a, Math.min(b, x));
@@ -118,6 +119,12 @@ export function validateECGData(meta) {
   const limbRequired = ["I", "II", "III", "aVR", "aVL", "aVF"];
   const missingLimb = limbRequired.filter((k) => !meta.leads_uV || !meta.leads_uV[k]);
   if (missingLimb.length) warnings.push(`Missing limb leads: ${missingLimb.join(", ")}`);
+
+  const missingViewerLeads = VIEWER_REQUIRED_LEADS.filter((k) => !meta.leads_uV || !meta.leads_uV[k]);
+  if (missingViewerLeads.length) warnings.push(`Missing leads (viewer): ${missingViewerLeads.join(", ")}`);
+
+  const syntheticFlag = meta.targets ? meta.targets.synthetic : undefined;
+  if (syntheticFlag !== true && syntheticFlag !== false) warnings.push("targets.synthetic missing (boolean required)");
 
   return { errors, warnings };
 }
