@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ECG Viewer — Unified</title>
+<style>
+  :root{
+    --paper:#fff7f7;
+    --trace:#111;
+    --grid1:rgba(205,40,40,0.18);
+    --grid5:rgba(205,40,40,0.44);
+    --text:#141414;
+    --muted:#5c5c5c;
+    --panel:#ffffff;
+    --border:#e2d6d6;
+    --btn:#f7f0f0;
+    --btn2:#efe3e3;
+    --accent:#1b6dff;
+    --ok:#0a7a3b;
+    --warn:#b00020;
+  }
+  body{background:#f3f3f3;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:16px;}
+  h2{margin:0 0 10px 0;font-weight:650;letter-spacing:0.2px}
+  .bar{
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; margin:10px 0 12px 0;
+    box-shadow:0 1px 0 rgba(0,0,0,0.04);
+  }
+  .bar label{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px}
+  select, input[type="file"]{
+    background:#fff; color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:6px 8px; font-size:13px;
+  }
+  button{
+    background:var(--btn); color:var(--text); border:1px solid var(--border); border-radius:10px;
+    padding:7px 10px; font-size:13px; cursor:pointer;
+  }
+  button:hover{background:var(--btn2)}
+  .pill{padding:4px 8px;border-radius:999px;background:#fff;border:1px solid var(--border);color:var(--muted);font-size:12px}
+  .wrap{border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--paper);}
+  canvas{display:block; width:100%; height:900px; background:var(--paper);}
+  .footer{margin-top:10px;color:var(--muted);font-size:12px;line-height:1.35}
+  .grid2{display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:8px;width:100%}
+  .kv{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 10px;min-height:44px}
+  .k{font-size:11px;color:var(--muted);margin-bottom:3px}
+  .v{font-size:14px;font-weight:650;color:var(--text)}
+  @media (max-width: 980px){
+    .grid2{grid-template-columns:repeat(2,minmax(140px,1fr));}
+    canvas{height:720px;}
+  }
+</style>
+</head>
+<body>
+<h2>ECG Viewer — Unified (Stacked + Print + Measurements)</h2>
+
+<div class="bar">
+  <label>Sample
+    <select id="sample">
+      <option value="../data/ecg_data_v5_world_class.json">World-class sample</option>
+      <option value="../data/ecg_data.json">Basic sample</option>
+    </select>
+  </label>
+  <label>Load file
+    <input id="fileInput" type="file" accept=".json" />
+  </label>
+  <label>Layout
+    <select id="layout">
+      <option value="stacked" selected>Stacked (15 leads)</option>
+      <option value="print12">12-lead print + rhythm</option>
+    </select>
+  </label>
+  <label>Speed
+    <select id="speed">
+      <option value="25" selected>25 mm/s</option>
+      <option value="50">50 mm/s</option>
+    </select>
+  </label>
+  <label>Gain
+    <select id="gain">
+      <option value="5">5 mm/mV</option>
+      <option value="10" selected>10 mm/mV</option>
+      <option value="20">20 mm/mV</option>
+    </select>
+  </label>
+  <label>Paper scale
+    <select id="pxmm">
+      <option value="4" selected>Fit</option>
+      <option value="6">Medium</option>
+      <option value="8">Large</option>
+    </select>
+  </label>
+  <label><input id="fid" type="checkbox" checked> Fiducials</label>
+  <button id="calBtn">Calipers: OFF</button>
+  <button id="clearBtn">Clear</button>
+  <span class="pill" id="info">—</span>
+  <span class="pill" id="integrityPill">—</span>
+</div>
+
+<div class="bar" style="width:100%">
+  <div class="grid2">
+    <div class="kv"><div class="k">Ventricular rate</div><div class="v" id="m_hr">—</div></div>
+    <div class="kv"><div class="k">PR</div><div class="v" id="m_pr">—</div></div>
+    <div class="kv"><div class="k">QRS</div><div class="v" id="m_qrs">—</div></div>
+    <div class="kv"><div class="k">QT / QTc (Bazett)</div><div class="v" id="m_qt">—</div></div>
+    <div class="kv"><div class="k">Axes (P / QRS / T)</div><div class="v" id="m_axes">—</div></div>
+    <div class="kv"><div class="k">Beats used (median)</div><div class="v" id="m_beats">—</div></div>
+  </div>
+</div>
+
+<div class="wrap"><canvas id="c"></canvas></div>
+<div class="footer" id="footer"></div>
+
+<script type="module">
+import {
+  fetchECG,
+  normalizeECGData,
+  physicsChecks,
+  detectRPeaks,
+  buildMedianBeat,
+  fiducialsFromMedian,
+  buildFullFiducialsFromMedian,
+  computeGlobalMeasurements,
+  fmtMs, fmtBpm, fmtDeg,
+} from "./js/ecg-core.js";
+
+const leads15 = ["I","II","III","aVR","aVL","aVF","V1","V2","V3","V4","V5","V6","V3R","V4R","V7"];
+const printGrid = [
+  ["I","aVR","V1","V4"],
+  ["II","aVL","V2","V5"],
+  ["III","aVF","V3","V6"],
+];
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", {alpha:false});
+
+const elSample = document.getElementById("sample");
+const elFile = document.getElementById("fileInput");
+const elLayout = document.getElementById("layout");
+const elSpeed = document.getElementById("speed");
+const elGain = document.getElementById("gain");
+const elPxmm = document.getElementById("pxmm");
+const elFid = document.getElementById("fid");
+const elCal = document.getElementById("calBtn");
+const elClear = document.getElementById("clearBtn");
+const elInfo = document.getElementById("info");
+const elInt = document.getElementById("integrityPill");
+const elFooter = document.getElementById("footer");
+
+const elHr = document.getElementById("m_hr");
+const elPR = document.getElementById("m_pr");
+const elQRS = document.getElementById("m_qrs");
+const elQT = document.getElementById("m_qt");
+const elAxes = document.getElementById("m_axes");
+const elBeats = document.getElementById("m_beats");
+
+let META = null;
+let ANALYSIS = null;
+let calipers = false;
+let pts = [];
+
+function resizeCanvas(){
+  const cssW = canvas.clientWidth || 1200;
+  const cssH = canvas.clientHeight || 900;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+function pxPerMm(){ return +elPxmm.value; }
+function speed(){ return +elSpeed.value; }
+function gain(){ return +elGain.value; }
+function pxPerSec(){ return speed()*pxPerMm(); }
+function pxPerUv(){ return (gain()*pxPerMm())/1000.0; }
+function cssSize(){ return { w: canvas.clientWidth || canvas.width, h: canvas.clientHeight || canvas.height }; }
+
+function drawGrid(){
+  const {w,h} = cssSize();
+  const p = pxPerMm();
+  ctx.clearRect(0,0,w,h);
+  ctx.lineWidth=1;
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue("--grid1");
+  ctx.beginPath();
+  for(let x=0;x<=w;x+=p){ ctx.moveTo(x,0); ctx.lineTo(x,h); }
+  for(let y=0;y<=h;y+=p){ ctx.moveTo(0,y); ctx.lineTo(w,y); }
+  ctx.stroke();
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue("--grid5");
+  ctx.beginPath();
+  for(let x=0;x<=w;x+=p*5){ ctx.moveTo(x,0); ctx.lineTo(x,h); }
+  for(let y=0;y<=h;y+=p*5){ ctx.moveTo(0,y); ctx.lineTo(w,y); }
+  ctx.stroke();
+}
+
+function drawCalibration(x0,y0){
+  const p = pxPerMm();
+  ctx.strokeStyle="#111";
+  ctx.beginPath();
+  ctx.moveTo(x0,y0);
+  ctx.lineTo(x0,y0-10*p);
+  ctx.lineTo(x0+0.2*pxPerSec(), y0-10*p);
+  ctx.lineTo(x0+0.2*pxPerSec(), y0);
+  ctx.stroke();
+}
+
+function drawFidsOnLead(baseY, left, leadData){
+  if(!elFid.checked || !ANALYSIS || !ANALYSIS.medFull) return;
+  const pps = pxPerSec();
+  const fs = META.fs;
+  ctx.strokeStyle = "rgba(27,109,255,0.8)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ANALYSIS.medFull.rPeaks.forEach(r=>{
+    const x = left + (r/fs)*pps;
+    ctx.moveTo(x, baseY-22);
+    ctx.lineTo(x, baseY+22);
+  });
+  ANALYSIS.medFull.qOn.forEach(q=>{
+    if(q==null) return;
+    const x = left + (q/fs)*pps;
+    ctx.moveTo(x, baseY-18); ctx.lineTo(x, baseY+18);
+  });
+  ANALYSIS.medFull.qOff.forEach(q=>{
+    if(q==null) return;
+    const x = left + (q/fs)*pps;
+    ctx.moveTo(x, baseY-18); ctx.lineTo(x, baseY+18);
+  });
+  ctx.stroke();
+}
+
+function drawStacked(){
+  const fs = META.fs;
+  const pps = pxPerSec();
+  const ppu = pxPerUv();
+  const hLead = 60;
+  const left = 50;
+  const top = 40;
+  const step = Math.max(1, Math.floor(fs / pps));
+  drawCalibration(left, top + hLead/2);
+  let y = top;
+  for(const lead of leads15){
+    const base = y + hLead/2;
+    const data = META.leads_uV[lead];
+    ctx.beginPath();
+    for(let i=0;i<data.length;i+=step){
+      const x = left + (i/fs)*pps;
+      const yy = base - data[i]*ppu;
+      if(i===0) ctx.moveTo(x,yy); else ctx.lineTo(x,yy);
+    }
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--trace");
+    ctx.stroke();
+    ctx.fillStyle="#444";
+    ctx.fillText(lead, 10, base+4);
+    if(lead==="II") drawFidsOnLead(base, left, data);
+    y += hLead;
+  }
+}
+
+function drawPrint12(){
+  const fs = META.fs;
+  const pps = pxPerSec();
+  const ppu = pxPerUv();
+  const {w,h} = cssSize();
+  const leftPad = 30;
+  const topPad = 30;
+  const cols = 4, rows = 3;
+  const cellW = (w - leftPad*2)/cols;
+  const cellH = (h - topPad*2)/rows;
+  const step = Math.max(1, Math.floor(fs / pps));
+
+  drawCalibration(leftPad + 6, topPad + cellH - 10);
+
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const lead = printGrid[r][c];
+      const x0 = leftPad + c*cellW;
+      const y0 = topPad + r*cellH;
+      const base = y0 + cellH/2;
+      ctx.beginPath();
+      const data = META.leads_uV[lead];
+      for(let i=0;i<data.length;i+=step){
+        const x = x0 + (i/fs)*pps;
+        const y = base - data[i]*ppu;
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--trace");
+      ctx.stroke();
+      ctx.fillStyle="#444";
+      ctx.fillText(lead, x0+6, y0+14);
+      if(lead==="II") drawFidsOnLead(base, x0, data);
+    }
+  }
+  const left = leftPad;
+  const right = leftPad + cellW*3;
+  const base = topPad + rows*cellH - cellH*0.35;
+  const rhythmLead = META.leads_uV.II;
+  ctx.beginPath();
+  const stepR = Math.max(1, Math.floor(fs / pps));
+  for(let i=0;i<rhythmLead.length;i+=stepR){
+    const x = left + (i/fs)*pps;
+    if(x>right) break;
+    const y = base - rhythmLead[i]*ppu;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  ctx.fillText("II rhythm", left+6, base - 10);
+}
+
+function drawCalipers(){
+  if(!calipers || pts.length===0) return;
+  ctx.strokeStyle= getComputedStyle(document.documentElement).getPropertyValue("--accent");
+  ctx.fillStyle= ctx.strokeStyle;
+  ctx.beginPath();
+  for(const p of pts){
+    ctx.moveTo(p.x-4,p.y); ctx.lineTo(p.x+4,p.y);
+    ctx.moveTo(p.x,p.y-4); ctx.lineTo(p.x,p.y+4);
+  }
+  if(pts.length===2){
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[1].x, pts[1].y);
+    const dt = Math.abs(pts[1].x - pts[0].x) / pxPerSec();
+    ctx.stroke();
+    ctx.fillText(`${Math.round(dt*1000)} ms`, (pts[0].x+pts[1].x)/2, Math.min(pts[0].y, pts[1].y)-6);
+  } else {
+    ctx.stroke();
+  }
+}
+
+function draw(){
+  if(!META) return;
+  resizeCanvas();
+  drawGrid();
+  if(elLayout.value==="print12") drawPrint12(); else drawStacked();
+  drawCalipers();
+  elInfo.textContent = `${speed()} mm/s • ${gain()} mm/mV • ${pxPerMm()} px/mm`;
+}
+
+function updateMetrics(){
+  if(!ANALYSIS){
+    elHr.textContent=elPR.textContent=elQRS.textContent=elQT.textContent=elAxes.textContent=elBeats.textContent="—";
+    return;
+  }
+  const m = ANALYSIS.measures || {};
+  elHr.textContent = fmtBpm(m.hr);
+  elPR.textContent = fmtMs(m.PR);
+  elQRS.textContent = fmtMs(m.QRS);
+  elQT.textContent = (m.QT==null) ? "—" : `${fmtMs(m.QT)} / ${fmtMs(m.QTcB)}`;
+  elAxes.textContent = (m.axes && (m.axes.pAxis!=null || m.axes.qAxis!=null || m.axes.tAxis!=null))
+    ? `${fmtDeg(m.axes.pAxis)} / ${fmtDeg(m.axes.qAxis)} / ${fmtDeg(m.axes.tAxis)}`
+    : "—";
+  const beatsUsed = (ANALYSIS.medBeat && ANALYSIS.medBeat.beatsUsed) || "—";
+  elBeats.textContent = beatsUsed;
+
+  const integ = META.integrity || {};
+  const ein = integ.einthoven_max_abs_error_uV;
+  elInt.textContent = (ein!=null) ? `Einthoven err ≤ ${ein} µV` : "Integrity unknown";
+  elInt.style.color = (ein!=null && ein < 50) ? "var(--ok)" : "var(--warn)";
+}
+
+function analyze(meta){
+  const rPeaks = detectRPeaks(meta);
+  const medBeat = buildMedianBeat(meta, rPeaks);
+  let medFids = null, medFull=null, measures=null;
+  if(medBeat && medBeat.ok){
+    medFids = fiducialsFromMedian(medBeat, meta.duration_s ? meta.duration_s/(rPeaks.length||1) : undefined);
+    medFull = buildFullFiducialsFromMedian(meta, rPeaks, medFids);
+    measures = computeGlobalMeasurements(meta, rPeaks, medBeat, medFids);
+  }
+  return { rPeaks, medBeat, medFids, medFull, measures };
+}
+
+async function loadSample(url){
+  elInfo.textContent = "Loading…";
+  const meta = await fetchECG(url);
+  meta.integrity = { ...physicsChecks(meta.leads_uV), ...meta.integrity };
+  META = meta;
+  ANALYSIS = analyze(META);
+  updateMetrics();
+  draw();
+}
+
+function loadFromFile(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const raw = JSON.parse(reader.result);
+      const meta = normalizeECGData(raw);
+      meta.integrity = { ...physicsChecks(meta.leads_uV), ...meta.integrity };
+      META = meta;
+      ANALYSIS = analyze(META);
+      updateMetrics();
+      draw();
+      elInfo.textContent = `Loaded ${file.name}`;
+    }catch(err){
+      elInfo.textContent = "Failed to load file";
+      console.error(err);
+    }
+  };
+  reader.readAsText(file);
+}
+
+canvas.addEventListener("click",(e)=>{
+  if(!calipers) return;
+  const r = canvas.getBoundingClientRect();
+  pts.push({x:e.clientX - r.left, y:e.clientY - r.top});
+  if(pts.length>2) pts = pts.slice(-2);
+  draw();
+});
+
+document.addEventListener("keydown",(e)=>{
+  if(e.key.toLowerCase()==="c"){
+    calipers=!calipers;
+    elCal.textContent = `Calipers: ${calipers?"ON":"OFF"}`;
+  }
+});
+
+elCal.onclick = ()=>{ calipers=!calipers; elCal.textContent = `Calipers: ${calipers?"ON":"OFF"}`; draw(); };
+elClear.onclick = ()=>{ pts=[]; draw(); };
+elLayout.onchange = draw;
+elSpeed.onchange = draw;
+elGain.onchange = draw;
+elPxmm.onchange = draw;
+elFid.onchange = draw;
+window.addEventListener("resize", draw);
+
+elSample.onchange = ()=> loadSample(elSample.value);
+elFile.onchange = ()=>{ if(elFile.files && elFile.files[0]) loadFromFile(elFile.files[0]); };
+
+loadSample(elSample.value).catch(err=>{
+  console.error(err);
+  elInfo.textContent = "Failed to load sample";
+});
+</script>
+</body>
+</html>

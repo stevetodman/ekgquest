@@ -5,6 +5,7 @@ This repository now uses a single JSON schema (`{ fs, duration_s, leads_uV, targ
 ## Layout
 - `viewer/` — active viewers using `<script type="module">` and the shared `js/ecg-core.js`.
   - `ecg_synth_viewer_age_dx_worldclass_medianbeat.html` (generator + measurements)
+  - `ecg_viewer_unified.html` (stacked + print layouts, fiducials/median measurements, file loader)
   - `ecg_viewer_single_v5_world_class.html` (normalized 15-lead viewer)
   - `ecg_viewer.html` (minimal viewer)
 - `viewer/js/ecg-core.js` — normalization, physics checks, R-peak detection, median-beat + fiducials, formatters.
