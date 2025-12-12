@@ -28,6 +28,16 @@
     padding:10px 12px; margin:10px 0 12px 0;
     box-shadow:0 1px 0 rgba(0,0,0,0.04);
   }
+  .welcome{
+    display:flex;flex-direction:column;gap:6px;
+    background:linear-gradient(135deg,#f8f0f0,#fff7f7);
+    border:1px solid var(--border); border-radius:12px;
+    padding:12px 14px; margin:10px 0 12px 0;
+    box-shadow:0 1px 0 rgba(0,0,0,0.04);
+  }
+  .welcome .t1{font-weight:700;font-size:15px;}
+  .welcome .t2{font-size:13px;color:var(--muted);}
+  .hint{font-size:12px;color:var(--muted);}
   .bar label{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px}
   select, input[type="file"]{
     background:#fff; color:var(--text); border:1px solid var(--border); border-radius:8px;
@@ -74,6 +84,11 @@
 <body>
 <h2>ECG Viewer — Unified (Stacked + Print + Measurements)</h2>
 
+<div class="welcome">
+  <div class="t1">In-browser ECG teaching lab for learners and educators.</div>
+  <div class="t2">Accurate measurements + print-quality layouts. Synthetic data is always labeled in-app; exports stay clean (no watermarks) while metadata keeps the synthetic flag.</div>
+</div>
+
 <div class="masthead">
   <div class="mh-title" id="mhTitle">Synthetic ECG</div>
   <div class="tag tag-unknown" id="mhSynth">SOURCE UNKNOWN</div>
@@ -98,6 +113,7 @@
       <option value="print12">12-lead print + rhythm</option>
     </select>
   </label>
+  <span class="hint" id="layoutHint">Stacked view: free speed/gain/scale. Print locks 25 mm/s, 10 mm/mV, clean exports.</span>
   <label>Speed
     <select id="speed">
       <option value="25" selected>25 mm/s</option>
@@ -124,6 +140,7 @@
   <span class="pill" id="info">—</span>
   <span class="pill" id="integrityPill">—</span>
   <button id="pngBtn">Export PNG</button>
+  <button id="printPngBtn">Export print PNG</button>
   <button id="pdfBtn">Print / PDF</button>
 </div>
 
@@ -170,6 +187,7 @@ const elClear = document.getElementById("clearBtn");
 const elInfo = document.getElementById("info");
 const elInt = document.getElementById("integrityPill");
 const elFooter = document.getElementById("footer");
+const elLayoutHint = document.getElementById("layoutHint");
 
 const elHr = document.getElementById("m_hr");
 const elPR = document.getElementById("m_pr");
@@ -184,6 +202,7 @@ const elMhPatient = document.getElementById("mhPatient");
 const elMhMeta = document.getElementById("mhMeta");
 const elMhWhen = document.getElementById("mhWhen");
 const elPng = document.getElementById("pngBtn");
+const elPrintPng = document.getElementById("printPngBtn");
 const elPdf = document.getElementById("pdfBtn");
 
 let META = null;
@@ -196,6 +215,8 @@ let recordedAt = new Date();
 let analysisWorker = null;
 let analysisSeq = 0;
 let activeAnalysisId = 0;
+
+const PRINT_LOCKS = { speed:25, gain:10, pxmm:6 };
 
 function ensureAnalysisWorker(){
   if(analysisWorker) return analysisWorker;
@@ -264,9 +285,10 @@ function resizeCanvas(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
 }
 
-function pxPerMm(){ return +elPxmm.value; }
-function speed(){ return +elSpeed.value; }
-function gain(){ return +elGain.value; }
+function isPrintLayout(){ return elLayout.value === "print12"; }
+function pxPerMm(){ return isPrintLayout() ? PRINT_LOCKS.pxmm : +elPxmm.value; }
+function speed(){ return isPrintLayout() ? PRINT_LOCKS.speed : +elSpeed.value; }
+function gain(){ return isPrintLayout() ? PRINT_LOCKS.gain : +elGain.value; }
 function pxPerSec(){ return speed()*pxPerMm(); }
 function pxPerUv(){ return (gain()*pxPerMm())/1000.0; }
 function cssSize(){ return { w: canvas.clientWidth || canvas.width, h: canvas.clientHeight || canvas.height }; }
@@ -281,6 +303,18 @@ const synthBadgeStyles = {
   real:{ bg:"rgba(229,247,236,0.9)", fg:"#0b6b3b", border:"#b5e1c7" },
   unknown:{ bg:"rgba(255,244,214,0.92)", fg:"#8a5a00", border:"#f1d08c" },
 };
+
+function syncControlLocks(){
+  const locked = isPrintLayout();
+  [elSpeed, elGain, elPxmm].forEach((el)=>{
+    el.disabled = locked;
+  });
+  if(locked){
+    elSpeed.value = String(PRINT_LOCKS.speed);
+    elGain.value = String(PRINT_LOCKS.gain);
+    elPxmm.value = String(PRINT_LOCKS.pxmm);
+  }
+}
 
 function drawGrid(){
   const {w,h} = cssSize();
@@ -488,10 +522,12 @@ function draw(){
   if(!META) return;
   resizeCanvas();
   drawGrid();
-  if(elLayout.value==="print12") drawPrint12(); else drawStacked();
+  if(isPrintLayout()) drawPrint12(); else drawStacked();
   drawCalipers();
   drawSyntheticBadge();
-  elInfo.textContent = `${speed()} mm/s • ${gain()} mm/mV • ${pxPerMm()} px/mm`;
+  const locked = isPrintLayout();
+  const msg = `${speed()} mm/s • ${gain()} mm/mV • ${pxPerMm()} px/mm${locked ? " (print locked)" : ""}`;
+  elInfo.textContent = msg;
 }
 
 function updateMetrics(){
@@ -576,7 +612,7 @@ document.addEventListener("keydown",(e)=>{
 
 elCal.onclick = ()=>{ calipers=!calipers; elCal.textContent = `Calipers: ${calipers?"ON":"OFF"}`; draw(); };
 elClear.onclick = ()=>{ pts=[]; draw(); };
-elLayout.onchange = draw;
+elLayout.onchange = ()=>{ syncControlLocks(); draw(); };
 elSpeed.onchange = draw;
 elGain.onchange = draw;
 elPxmm.onchange = draw;
@@ -585,6 +621,37 @@ window.addEventListener("resize", draw);
 
 elSample.onchange = ()=> loadSample(elSample.value);
 elFile.onchange = ()=>{ if(elFile.files && elFile.files[0]) loadFromFile(elFile.files[0]); };
+
+function exportPrintSnapshot(){
+  if(!META) return;
+  const prevLayout = elLayout.value;
+  const prevSpeed = elSpeed.value;
+  const prevGain = elGain.value;
+  const prevPxmm = elPxmm.value;
+  const prevW = canvas.style.width;
+  const prevH = canvas.style.height;
+
+  elLayout.value = "print12";
+  syncControlLocks();
+  canvas.style.width = "1600px";
+  canvas.style.height = "1200px";
+  draw();
+
+  const url = canvas.toDataURL("image/png");
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "ecg_print.png";
+  a.click();
+
+  canvas.style.width = prevW;
+  canvas.style.height = prevH;
+  elLayout.value = prevLayout;
+  elSpeed.value = prevSpeed;
+  elGain.value = prevGain;
+  elPxmm.value = prevPxmm;
+  syncControlLocks();
+  draw();
+}
 
 elPng.onclick = ()=>{
   if(!META) return;
@@ -595,10 +662,12 @@ elPng.onclick = ()=>{
   a.click();
 };
 
+elPrintPng.onclick = exportPrintSnapshot;
 elPdf.onclick = ()=>{
   window.print();
 };
 
+syncControlLocks();
 loadSample(elSample.value).catch(err=>{
   console.error(err);
   elInfo.textContent = "Failed to load sample";

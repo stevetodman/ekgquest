@@ -10,6 +10,7 @@ Built for learners and educators first. The repository uses a single JSON schema
   - `ecg_viewer_unified.html` (stacked + print layouts, fiducials/median measurements, file loader)
   - `ecg_viewer_single_v5_world_class.html` (normalized 15-lead viewer)
   - `ecg_viewer.html` (minimal viewer)
+- `docs/ROADMAP.md` — North Star plan and milestones for the flagship teaching lab.
 - `viewer/js/ecg-core.js` — normalization, physics checks, R-peak detection, median-beat + fiducials, formatters.
 - `data/` — normalized sample ECGs.
 - `releases/` — zipped/archived snapshots (release artifacts only).
