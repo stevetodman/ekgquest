@@ -1,0 +1,8 @@
+{
+  "name": "ekgquest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/smoke.test.js"
+  }
+}
