@@ -6,6 +6,11 @@ Build a **MUSE‑style ECG viewer** plus a **pediatric ECG synthesizer** for **e
 - **Responsive**: smooth interaction on long/high‑fs signals.
 - **Testable**: every change measured against objective metrics and regressions.
 
+## Goals (what “good” looks like)
+- **Measurements you trust**: vendor-style intervals (PR/QRS/QT), axes, and QTc (Bazett/Fridericia/Framingham) computed from transparent fiducials. The fiducial logic is explainable (click-to-show windows, baselines, thresholds) and round-trips in the schema for auditability.
+- **Print-ready output**: true 12-lead print plus rhythm strip that matches clinical scaling (10 mm/mV, 25 mm/s) with consistent gain/time bases across leads and a correct calibration pulse. Export preserves the layout in PNG/PDF without reflow.
+- **Synthetic ECGs are “indistinguishable”**: in blinded reviews (expert or classifier), waveform quality and derived measurements cannot reliably separate synthetic from real signals. Acceptance is empirical: detection accuracy stays at chance and derived metric distributions stay within pre-set deltas per age/rhythm bucket.
+
 ## Safety / Positioning (non‑negotiable)
 - All generated ECGs must be clearly tagged `targets.synthetic=true` and the UI must default to an on‑screen “SYNTHETIC” label.
 - Do not claim clinical equivalence; do not ship as “for diagnosis”.
