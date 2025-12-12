@@ -1,7 +1,11 @@
 # EKGQuest North Star Spec (WIP)
 
 ## Purpose
-Build a **MUSE‑style ECG viewer** plus a **pediatric ECG synthesizer** for **education and research**. The system must be:
+Primary audience: learners and educators building an in-browser ECG teaching lab.
+
+> North Star: Build the best in-browser ECG teaching lab: a MUSE-style viewer with accurate measurements and print-quality layouts, plus a high-fidelity pediatric ECG synthesizer that can generate realistic cases on demand—so learners can practice and educators can teach without needing real patient data.
+
+The system must be:
 - **Coherent**: one schema, one measurement pipeline, one rendering pipeline.
 - **Responsive**: smooth interaction on long/high‑fs signals.
 - **Testable**: every change measured against objective metrics and regressions.
@@ -9,10 +13,11 @@ Build a **MUSE‑style ECG viewer** plus a **pediatric ECG synthesizer** for **e
 ## Goals (what “good” looks like)
 - **Measurements you trust**: vendor-style intervals (PR/QRS/QT), axes, and QTc (Bazett/Fridericia/Framingham) computed from transparent fiducials. The fiducial logic is explainable (click-to-show windows, baselines, thresholds) and round-trips in the schema for auditability.
 - **Print-ready output**: true 12-lead print plus rhythm strip that matches clinical scaling (10 mm/mV, 25 mm/s) with consistent gain/time bases across leads and a correct calibration pulse. Export preserves the layout in PNG/PDF without reflow.
-- **Synthetic ECGs are “indistinguishable”**: in blinded reviews (expert or classifier), waveform quality and derived measurements cannot reliably separate synthetic from real signals. Acceptance is empirical: detection accuracy stays at chance and derived metric distributions stay within pre-set deltas per age/rhythm bucket.
+- **High-fidelity synthetic ECGs**: pediatric generator quality is judged by an indistinguishability harness—blinded experts/classifiers stay at chance when separating synth vs real, and derived metric distributions remain within pre-set deltas per age/rhythm bucket.
 
 ## Safety / Positioning (non‑negotiable)
 - All generated ECGs must be clearly tagged `targets.synthetic=true` and the UI must default to an on‑screen “SYNTHETIC” label.
+- No watermark overlays on viewer/print/export; keep outputs clean while surfacing synthetic/real status via UI labels and metadata.
 - Do not claim clinical equivalence; do not ship as “for diagnosis”.
 - Keep a hard separation between “viewer for real ECGs” and “generator” in UX copy and metadata, even if they share infrastructure.
 
@@ -50,7 +55,7 @@ Requirements:
 - UI remains responsive: heavy work off main thread (Web Worker).
 - Render uses downsampling/LOD so long recordings don’t hitch on pan/zoom.
 
-## Synthesizer: “Indistinguishable pediatric ECG” Definition of Done
+## Synthesizer: High-fidelity pediatric ECG Definition of Done
 This is measurable, not vibes:
 - **Distribution match** by age bin (newborn/infant/child/adolescent): HR/PR/QRS/QT/QTc/axes distributions and amplitude/r‑wave progression stats within thresholds.
 - **Rhythm realism**: sinus variability, ectopy, SVT/flutter/AF/AV block patterns.

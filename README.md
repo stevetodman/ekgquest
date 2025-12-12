@@ -1,6 +1,8 @@
 # ECG viewer + synthesizer
 
-This repository now uses a single JSON schema (`{ fs, duration_s, leads_uV, targets, integrity }`) and shared JS utilities to keep the viewers in sync. Legacy snapshots are kept only as release artifacts under `releases/`.
+> North Star: Build the best in-browser ECG teaching lab: a MUSE-style viewer with accurate measurements and print-quality layouts, plus a high-fidelity pediatric ECG synthesizer that can generate realistic cases on demand—so learners can practice and educators can teach without needing real patient data.
+
+Built for learners and educators first. The repository uses a single JSON schema (`{ fs, duration_s, leads_uV, targets, integrity }`) and shared JS utilities to keep all viewers in sync. Legacy snapshots are kept only as release artifacts under `releases/`.
 
 ## Layout
 - `viewer/` — active viewers using `<script type="module">` and the shared `js/ecg-core.js`.
@@ -26,5 +28,6 @@ npm test
 ```
 
 ## Notes
-- Everything here is synthetic / educational.
+- Everything here is synthetic / educational and meant for teaching practice.
+- No watermarks on prints/exports; synthetic/real status stays in metadata and the in-app “SYNTHETIC” label.
 - Calipers: press **C** or use the Calipers toggle; click two points. Some viewers snap fiducials/median beats in the UI.
