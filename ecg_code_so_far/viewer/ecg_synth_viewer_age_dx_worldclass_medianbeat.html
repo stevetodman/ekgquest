@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ECG Synth + Viewer (Median Beat + Measurements)</title>
+<style>
+  :root{
+    --paper:#fff7f7;
+    --trace:#111;
+    --grid1:rgba(205,40,40,0.18);
+    --grid5:rgba(205,40,40,0.44);
+    --text:#141414;
+    --muted:#5c5c5c;
+    --panel:#ffffff;
+    --border:#e2d6d6;
+    --btn:#f7f0f0;
+    --btn2:#efe3e3;
+    --accent:#1b6dff;
+    --ok:#0a7a3b;
+    --warn:#b00020;
+    --chip:#faf6f6;
+  }
+  body{background:#f3f3f3;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:16px;}
+  h2{margin:0 0 10px 0;font-weight:650;letter-spacing:0.2px}
+  .bar{
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; margin:10px 0 12px 0;
+    box-shadow:0 1px 0 rgba(0,0,0,0.04);
+  }
+  .bar label{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px}
+  select, input[type="number"], input[type="checkbox"]{
+    background:#fff; color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:6px 8px; font-size:13px;
+  }
+  input[type="number"]{ width:92px; }
+  button{
+    background:var(--btn); color:var(--text); border:1px solid var(--border); border-radius:10px;
+    padding:7px 10px; font-size:13px; cursor:pointer;
+  }
+  button:hover{background:var(--btn2)}
+  .hint{color:var(--muted); font-size:12px}
+  .pill{padding:4px 8px;border-radius:999px;background:#fff;border:1px solid var(--border);color:var(--muted);font-size:12px}
+  .chip{padding:6px 10px;border-radius:10px;background:var(--chip);border:1px solid var(--border);font-size:12px;color:var(--muted)}
+  .wrap{border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--paper);}
+  canvas{display:block; width:100%; height:920px; background:var(--paper);}
+  .footer{margin-top:10px;color:var(--muted);font-size:12px;line-height:1.35}
+  .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#fff;border:1px solid var(--border);border-radius:6px;padding:1px 6px;color:var(--text)}
+  .ok{color:var(--ok); font-weight:650}
+  .bad{color:var(--warn); font-weight:650}
+  .grid2{display:grid;grid-template-columns:repeat(6,minmax(160px,1fr));gap:8px;width:100%}
+  .kv{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 10px;min-height:44px}
+  .k{font-size:11px;color:var(--muted);margin-bottom:3px}
+  .v{font-size:14px;font-weight:650;color:var(--text)}
+  .v small{font-weight:500;color:var(--muted)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  @media (max-width: 980px){
+    .grid2{grid-template-columns:repeat(2,minmax(160px,1fr));}
+  }
+</style>
+</head>
+<body>
+<h2>ECG Synth + Viewer — Vendor-Style Median Beat Measurements</h2>
+
+<div class="bar">
+  <label>Age (years)
+    <input id="ageYears" type="number" min="0" max="25" step="0.1" value="4">
+  </label>
+  <label>Diagnosis
+    <select id="dx">
+      <option>Normal sinus</option>
+      <option>WPW</option>
+      <option>RBBB</option>
+      <option>LVH</option>
+      <option>RVH</option>
+      <option>SVT (narrow)</option>
+      <option>Atrial flutter (2:1)</option>
+      <option>Long QT</option>
+      <option>Pericarditis</option>
+    </select>
+  </label>
+  <label>Seed
+    <input id="seed" type="number" min="1" step="1" value="7">
+  </label>
+  <button id="genBtn">Generate</button>
+  <button id="randBtn">Random variant</button>
+  <button id="csvBtn">Export CSV</button>
+  <button id="jsonBtn">Export JSON</button>
+  <span class="pill" id="physicsPill">—</span>
+  <span class="hint">Educational synthesis only. Not for clinical care.</span>
+</div>
+
+<div class="bar">
+  <label>Layout
+    <select id="layout">
+      <option value="stacked" selected>Stacked (15 leads)</option>
+      <option value="print12">12-lead print + rhythm</option>
+    </select>
+  </label>
+  <label>Speed
+    <select id="speed">
+      <option value="25" selected>25 mm/s</option>
+      <option value="50">50 mm/s</option>
+    </select>
+  </label>
+  <label>Gain
+    <select id="gain">
+      <option value="5">5 mm/mV</option>
+      <option value="10" selected>10 mm/mV</option>
+      <option value="20">20 mm/mV</option>
+    </select>
+  </label>
+  <label>Paper scale
+    <select id="pxmm">
+      <option value="4" selected>Fit</option>
+      <option value="6">Medium</option>
+      <option value="8">Large</option>
+    </select>
+  </label>
+  <label><input id="noise" type="checkbox" checked> Noise</label>
+  <label><input id="filters" type="checkbox" checked> Diagnostic filter</label>
+  <label><input id="fid" type="checkbox" checked> Fiducials</label>
+  <label><input id="snap" type="checkbox" checked> Snap calipers</label>
+  <label><input id="median" type="checkbox" checked> Median-beat measurements</label>
+  <button id="calBtn">Calipers: OFF</button>
+  <button id="clearBtn">Clear</button>
+  <span class="pill" id="windowInfo">—</span>
+  <span class="hint">Calipers: <span class="kbd">C</span> • Drag to pan (stacked) • Wheel zoom</span>
+</div>
+
+<div class="bar" style="width:100%">
+  <div class="grid2">
+    <div class="kv"><div class="k">Ventricular rate</div><div class="v" id="m_hr">—</div></div>
+    <div class="kv"><div class="k">PR</div><div class="v" id="m_pr">—</div></div>
+    <div class="kv"><div class="k">QRS</div><div class="v" id="m_qrs">—</div></div>
+    <div class="kv"><div class="k">QT</div><div class="v" id="m_qt">—</div></div>
+    <div class="kv"><div class="k">QTc (Bazett / Fridericia / Framingham)</div><div class="v" id="m_qtc">—</div></div>
+    <div class="kv"><div class="k">Axes (P / QRS / T)</div><div class="v" id="m_axes">—</div></div>
+    <div class="kv"><div class="k">Physics checks</div><div class="v" id="m_phys">—</div></div>
+    <div class="kv"><div class="k">Beats used for median</div><div class="v" id="m_medianbeats">—</div></div>
+    <div class="kv"><div class="k">Fiducials source</div><div class="v" id="m_fidsrc">—</div></div>
+    <div class="kv"><div class="k">Median-beat fiducials</div><div class="v" id="m_medfids">—</div></div>
+    <div class="kv"><div class="k">Diagnosis preset</div><div class="v" id="m_dx">—</div></div>
+    <div class="kv"><div class="k">Age preset</div><div class="v" id="m_age">—</div></div>
+  </div>
+</div>
+
+<div class="wrap"><canvas id="c"></canvas></div>
+<div class="footer" id="footer"></div>
+
+<script>
+/* -------------------------------------------------------------
+   Adds a vendor-style "median beat" pipeline:
+   - Detect R peaks (Lead II)
+   - Construct per-lead median complex aligned on R
+   - Measure PR/QRS/QT on the median complex (stable like MUSE/12SL)
+   - Use median-derived fiducial offsets to place fiducials on the full tracing
+   - HR still comes from mean RR on the full recording
+   ------------------------------------------------------------- */
+
+// ---------- utilities ----------
+function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+function lerp(a,b,u){ return a + (b-a)*u; }
+function interpAnchors(age, anchors, key){
+  if(age <= anchors[0].age) return anchors[0][key];
+  if(age >= anchors[anchors.length-1].age) return anchors[anchors.length-1][key];
+  for(let i=0;i<anchors.length-1;i++){
+    const A=anchors[i], B=anchors[i+1];
+    if(age>=A.age && age<=B.age){
+      const u=(age-A.age)/(B.age-A.age);
+      return lerp(A[key], B[key], u);
+    }
+  }
+  return anchors[0][key];
+}
+function norm(v){
+  const n = Math.hypot(v[0],v[1],v[2]);
+  return (n===0)?[1,0,0]:[v[0]/n, v[1]/n, v[2]/n];
+}
+function axisDir(axisDeg, z){
+  const th = axisDeg*Math.PI/180;
+  return norm([Math.cos(th), Math.sin(th), z||0]);
+}
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
+function randn(rng){
+  let u=0,v=0;
+  while(u===0) u=rng();
+  while(v===0) v=rng();
+  return Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+}
+function addGaussian3(Vx,Vy,Vz, fs, mu, sigma, amp, dir){
+  const n = Vx.length;
+  const i0 = Math.max(0, Math.floor((mu - 4*sigma) * fs));
+  const i1 = Math.min(n-1, Math.ceil((mu + 4*sigma) * fs));
+  const inv2s2 = 1.0 / (2*sigma*sigma);
+  for(let i=i0;i<=i1;i++){
+    const tt = i/fs;
+    const g = Math.exp(-(tt-mu)*(tt-mu)*inv2s2) * amp;
+    Vx[i] += g*dir[0];
+    Vy[i] += g*dir[1];
+    Vz[i] += g*dir[2];
+  }
+}
+function highpass1(x, fs, fc){
+  const dt = 1/fs;
+  const RC = 1/(2*Math.PI*fc);
+  const a = RC/(RC+dt);
+  const y = new Float64Array(x.length);
+  y[0]=0;
+  for(let i=1;i<x.length;i++) y[i] = a*(y[i-1] + x[i] - x[i-1]);
+  return y;
+}
+function lowpass1(x, fs, fc){
+  const dt = 1/fs;
+  const RC = 1/(2*Math.PI*fc);
+  const a = dt/(RC+dt);
+  const y = new Float64Array(x.length);
+  y[0]=x[0];
+  for(let i=1;i<x.length;i++) y[i] = y[i-1] + a*(x[i]-y[i-1]);
+  return y;
+}
+function applyDiagnosticBand(x, fs){
+  let y = highpass1(x, fs, 0.05);
+  y = lowpass1(y, fs, 150);
+  return y;
+}
+function medianOfSmallArray(a){
+  // a: JS array of numbers
+  a.sort((x,y)=>x-y);
+  return a[(a.length/2)|0];
+}
+function medianWindow(arr, i0, i1){
+  i0 = Math.max(0, i0|0);
+  i1 = Math.min(arr.length-1, i1|0);
+  if(i1 <= i0) return arr[i0] || 0;
+  const tmp = [];
+  for(let i=i0;i<=i1;i++) tmp.push(arr[i]);
+  return medianOfSmallArray(tmp);
+}
+function mean(arr){
+  if(!arr || arr.length===0) return null;
+  let s=0, n=0;
+  for(const v of arr){ if(v==null) continue; s += v; n++; }
+  return (n===0)?null:(s/n);
+}
+function fmtMs(x){ return (x==null || !isFinite(x)) ? "—" : `${Math.round(x)} ms`; }
+function fmtBpm(x){ return (x==null || !isFinite(x)) ? "—" : `${Math.round(x)} bpm`; }
+function fmtDeg(x){ return (x==null || !isFinite(x)) ? "—" : `${Math.round(x)}°`; }
+
+// ---------- age defaults ----------
+const AGE = [
+  {age:0.0, HR:140, PR:0.10, QRS:0.065, QTc:0.410, Paxis:65, QRSaxis:125, Taxis:85, rvDom:1.00, juvenileT:1.00, zQ2:0.75, zT:-0.60},
+  {age:1.0, HR:120, PR:0.11, QRS:0.070, QTc:0.410, Paxis:60, QRSaxis:105, Taxis:70, rvDom:0.85, juvenileT:0.90, zQ2:0.65, zT:-0.55},
+  {age:4.0, HR:100, PR:0.12, QRS:0.070, QTc:0.410, Paxis:60, QRSaxis:75,  Taxis:50, rvDom:0.65, juvenileT:0.75, zQ2:0.55, zT:-0.45},
+  {age:8.0, HR:85,  PR:0.14, QRS:0.080, QTc:0.410, Paxis:55, QRSaxis:60,  Taxis:45, rvDom:0.45, juvenileT:0.50, zQ2:0.45, zT:-0.32},
+  {age:16.0,HR:70,  PR:0.16, QRS:0.090, QTc:0.410, Paxis:55, QRSaxis:50,  Taxis:40, rvDom:0.25, juvenileT:0.20, zQ2:0.35, zT:-0.18},
+];
+function ageDefaults(ageY){
+  ageY = clamp(ageY, 0, 25);
+  const HR = interpAnchors(ageY, AGE, "HR");
+  const PR = interpAnchors(ageY, AGE, "PR");
+  const QRS = interpAnchors(ageY, AGE, "QRS");
+  const QTc = interpAnchors(ageY, AGE, "QTc");
+  const Paxis = interpAnchors(ageY, AGE, "Paxis");
+  const QRSaxis = interpAnchors(ageY, AGE, "QRSaxis");
+  const Taxis = interpAnchors(ageY, AGE, "Taxis");
+  const rvDom = interpAnchors(ageY, AGE, "rvDom");
+  const juvenileT = interpAnchors(ageY, AGE, "juvenileT");
+  const zQ2 = interpAnchors(ageY, AGE, "zQ2");
+  const zT = interpAnchors(ageY, AGE, "zT");
+  return {HR, PR, QRS, QTc, Paxis, QRSaxis, Taxis, rvDom, juvenileT, zQ2, zT};
+}
+function applyDx(p, dx){
+  const q = {...p};
+  if(dx==="WPW"){ q.PR = Math.max(0.08, p.PR - 0.04); q.QRS = Math.min(0.12, p.QRS + 0.04); }
+  if(dx==="RBBB"){ q.QRS = Math.min(0.14, p.QRS + 0.04); }
+  if(dx==="LVH"){ q.QRSaxis = Math.max(-30, p.QRSaxis - 35); }
+  if(dx==="RVH"){ q.QRSaxis = Math.min(170, p.QRSaxis + 35); q.rvDom = Math.min(1.20, p.rvDom + 0.25); }
+  if(dx==="SVT (narrow)"){ q.HR = Math.max(150, Math.min(230, p.HR*1.9)); }
+  if(dx==="Atrial flutter (2:1)"){ q.HR = Math.max(120, Math.min(180, p.HR*1.5)); }
+  if(dx==="Long QT"){ q.QTc = 0.500; }
+  return q;
+}
+
+// ---------- electrode geometry (simplified forward model) ----------
+const R = {
+  RA:  norm([-1.00, -0.55,  0.20]),
+  LA:  norm([ 1.00, -0.55,  0.20]),
+  LL:  norm([ 0.05,  1.25,  0.05]),
+  V1:  norm([-0.75,  0.00,  1.10]),
+  V2:  norm([-0.05,  0.00,  1.05]),
+  V3:  norm([ 0.55,  0.10,  0.95]),
+  V4:  norm([ 1.00,  0.20,  0.78]),
+  V5:  norm([ 1.25,  0.20,  0.45]),
+  V6:  norm([ 1.35,  0.20,  0.15]),
+  V3R: norm([-0.55,  0.10,  0.95]),
+  V4R: norm([-0.95,  0.20,  0.78]),
+  V7:  norm([ 1.05,  0.20, -0.35]),
+};
+function dotDipole(Vx,Vy,Vz, r){
+  const out = new Float64Array(Vx.length);
+  for(let i=0;i<out.length;i++) out[i] = Vx[i]*r[0] + Vy[i]*r[1] + Vz[i]*r[2];
+  return out;
+}
+
+// ---------- synthesis ----------
+function synthECG(ageY, dx, seed, enableNoise, enableFilters){
+  const fs = 1000;
+  const duration = 10.0;
+  const N = Math.floor(duration*fs);
+
+  const base = ageDefaults(ageY);
+  const p = applyDx(base, dx);
+  const RR = 60/p.HR;
+  const QT = p.QTc * Math.sqrt(RR);
+
+  const Vx = new Float64Array(N), Vy = new Float64Array(N), Vz = new Float64Array(N);
+
+  const dP1 = norm([-0.35, 0.85,  0.22]);
+  const dP2 = norm([ 0.55, 0.75, -0.15]);
+  const dQ1 = norm([-0.95, 0.10,  0.90*(0.6+0.4*p.rvDom)]);
+  const dQ2 = axisDir(p.QRSaxis, p.zQ2);
+  const dQ3 = norm([ 0.45, -0.65, -0.80]);
+  const dT1 = axisDir(p.Taxis, p.zT*(0.6+0.4*p.juvenileT));
+  const dT2 = norm([dT1[0]*0.90, dT1[1]*1.05, dT1[2]*1.10]);
+
+  const rng = mulberry32(Math.max(1, Math.floor(seed)));
+
+  const beatStarts = [];
+  let tt = 0.6;
+  const rrJit = (dx.includes("flutter") || dx.includes("SVT")) ? 0.0 : 0.006;
+  while(tt < duration - 0.8){
+    beatStarts.push(tt);
+    const rsa = (dx.includes("flutter") || dx.includes("SVT")) ? 0 : 0.018*Math.sin(2*Math.PI*0.22*tt);
+    const rr = RR*(1.0 + rsa) + randn(rng)*rrJit;
+    tt += clamp(rr, 0.35, 1.20);
+  }
+
+  if(dx==="Atrial flutter (2:1)"){
+    const f = 5.0, amp = 0.07;
+    const dF = axisDir(p.Paxis, 0.10);
+    for(let i=0;i<N;i++){
+      const x = (i/fs)*f;
+      const saw = 2*(x - Math.floor(x+0.5));
+      const F = amp*saw;
+      Vx[i]+=F*dF[0]; Vy[i]+=F*dF[1]; Vz[i]+=F*dF[2];
+    }
+  }
+
+  for(const t0 of beatStarts){
+    const aScale = 1.0 + randn(rng)*0.02;
+    const tJit = randn(rng)*0.003;
+    const qrsOn = t0 + p.PR;
+    const qrsC  = qrsOn + p.QRS/2;
+
+    if(dx!=="SVT (narrow)" && dx!=="Atrial flutter (2:1)"){
+      const pCenter = qrsOn - 0.055 + tJit;
+      addGaussian3(Vx,Vy,Vz, fs, pCenter - 0.010, 0.014, 0.075*aScale, dP1);
+      addGaussian3(Vx,Vy,Vz, fs, pCenter + 0.012, 0.016, 0.095*aScale, dP2);
+    }
+
+    addGaussian3(Vx,Vy,Vz, fs, qrsC - 0.32*p.QRS + tJit, 0.09*p.QRS, 0.22*aScale, dQ1);
+    addGaussian3(Vx,Vy,Vz, fs, qrsC + tJit,              0.16*p.QRS, 1.10*aScale, dQ2);
+    addGaussian3(Vx,Vy,Vz, fs, qrsC + 0.34*p.QRS + tJit,  0.12*p.QRS, 0.36*aScale, dQ3);
+
+    if(dx==="WPW"){
+      const dDelta = norm([dQ1[0]*0.6 + dQ2[0]*0.4, dQ1[1]*0.6 + dQ2[1]*0.4, dQ1[2]*0.6 + dQ2[2]*0.4]);
+      addGaussian3(Vx,Vy,Vz, fs, qrsOn + 0.012 + tJit, 0.022, 0.28*aScale, dDelta);
+    }
+    if(dx==="RBBB"){
+      const dLate = norm([-0.90, 0.00, 0.95]);
+      addGaussian3(Vx,Vy,Vz, fs, qrsOn + 0.82*p.QRS + tJit, 0.010 + 0.08*p.QRS, 0.35*aScale, dLate);
+    }
+    if(dx==="LVH"){
+      addGaussian3(Vx,Vy,Vz, fs, qrsC + tJit, 0.16*p.QRS, 0.55*aScale, axisDir(p.QRSaxis-20, p.zQ2*0.8));
+    }
+    if(dx==="RVH"){
+      addGaussian3(Vx,Vy,Vz, fs, qrsC + tJit, 0.14*p.QRS, 0.45*aScale, norm([-0.75, 0.20, 0.95]));
+    }
+
+    const tPeak = qrsOn + 0.62*QT + tJit;
+    addGaussian3(Vx,Vy,Vz, fs, tPeak + 0.000, 0.10*QT, 0.22*aScale, dT1);
+    addGaussian3(Vx,Vy,Vz, fs, tPeak + 0.030, 0.14*QT, 0.18*aScale, dT2);
+    addGaussian3(Vx,Vy,Vz, fs, tPeak + 0.160, 0.040, 0.015*aScale, axisDir(p.Taxis, -0.10));
+
+    if(dx==="Pericarditis"){
+      const tau = 0.008;
+      const dST = axisDir(p.Taxis, p.zT*0.7);
+      const dPR = axisDir(p.Paxis, 0.0);
+      function sig(tt){ return 0.5*(1+Math.tanh(tt/tau)); }
+      const j = qrsOn + 0.04;
+      const stEnd = qrsOn + 0.18;
+      const prStart = t0 + 0.10;
+      const prEnd = qrsOn - 0.01;
+      const aST = 0.10*aScale;
+      const aPR = -0.04*aScale;
+      const i0 = Math.max(0, Math.floor((t0+0.05)*fs));
+      const i1 = Math.min(N-1, Math.ceil((stEnd+0.25)*fs));
+      for(let i=i0;i<=i1;i++){
+        const tt2 = i/fs;
+        const stPlate = (sig(tt2-j) - sig(tt2-stEnd)) * aST;
+        const prPlate = (sig(tt2-prStart) - sig(tt2-prEnd)) * aPR;
+        Vx[i] += stPlate*dST[0] + prPlate*dPR[0];
+        Vy[i] += stPlate*dST[1] + prPlate*dPR[1];
+        Vz[i] += stPlate*dST[2] + prPlate*dPR[2];
+      }
+    }
+  }
+
+  // electrode potentials
+  let phiRA = dotDipole(Vx,Vy,Vz, R.RA);
+  let phiLA = dotDipole(Vx,Vy,Vz, R.LA);
+  let phiLL = dotDipole(Vx,Vy,Vz, R.LL);
+  let phiV1  = dotDipole(Vx,Vy,Vz, R.V1);
+  let phiV2  = dotDipole(Vx,Vy,Vz, R.V2);
+  let phiV3  = dotDipole(Vx,Vy,Vz, R.V3);
+  let phiV4  = dotDipole(Vx,Vy,Vz, R.V4);
+  let phiV5  = dotDipole(Vx,Vy,Vz, R.V5);
+  let phiV6  = dotDipole(Vx,Vy,Vz, R.V6);
+  let phiV3R = dotDipole(Vx,Vy,Vz, R.V3R);
+  let phiV4R = dotDipole(Vx,Vy,Vz, R.V4R);
+  let phiV7  = dotDipole(Vx,Vy,Vz, R.V7);
+
+  // electrode noise (preserves Einthoven)
+  if(enableNoise){
+    const phase1 = rng()*Math.PI*2;
+    const phase2 = rng()*Math.PI*2;
+    for(let i=0;i<N;i++){
+      const tt = i/fs;
+      const bw = 0.040*Math.sin(2*Math.PI*0.25*tt + phase1);
+      const pl = 0.004*Math.sin(2*Math.PI*60*tt + phase2);
+      phiRA[i]+=bw+pl; phiLA[i]+=bw+pl; phiLL[i]+=bw+pl;
+    }
+    function addEMG(x, scale){
+      const nComp = 18;
+      const freqs=[], phases=[];
+      for(let k=0;k<nComp;k++){ freqs.push(20 + (100-20)*rng()); phases.push(2*Math.PI*rng()); }
+      let envPh = 2*Math.PI*rng();
+      for(let i=0;i<N;i++){
+        const tt = i/fs;
+        const env = 0.5 + 0.5*Math.sin(2*Math.PI*0.4*tt + envPh);
+        let s=0;
+        for(let k=0;k<nComp;k++) s += Math.sin(2*Math.PI*freqs[k]*tt + phases[k]);
+        s = (s/nComp) * env * scale;
+        x[i] += s;
+      }
+    }
+    addEMG(phiRA, 0.003); addEMG(phiLA, 0.003); addEMG(phiLL, 0.003);
+    addEMG(phiV1, 0.005); addEMG(phiV2, 0.005); addEMG(phiV3, 0.005);
+    addEMG(phiV4, 0.004); addEMG(phiV5, 0.004); addEMG(phiV6, 0.004);
+    addEMG(phiV3R,0.005); addEMG(phiV4R,0.005); addEMG(phiV7, 0.004);
+  }
+
+  const WCT = new Float64Array(N);
+  for(let i=0;i<N;i++) WCT[i] = (phiRA[i]+phiLA[i]+phiLL[i])/3.0;
+
+  function diff(a,b){ const y=new Float64Array(N); for(let i=0;i<N;i++) y[i]=a[i]-b[i]; return y; }
+  function comb(a,b,c){ const y=new Float64Array(N); for(let i=0;i<N;i++) y[i]=a[i]-(b[i]+c[i])/2; return y; }
+
+  let I   = diff(phiLA, phiRA);
+  let II  = diff(phiLL, phiRA);
+  let III = diff(phiLL, phiLA);
+  let aVR = comb(phiRA, phiLA, phiLL);
+  let aVL = comb(phiLA, phiRA, phiLL);
+  let aVF = comb(phiLL, phiRA, phiLA);
+
+  let V1  = diff(phiV1,  WCT);
+  let V2  = diff(phiV2,  WCT);
+  let V3  = diff(phiV3,  WCT);
+  let V4  = diff(phiV4,  WCT);
+  let V5  = diff(phiV5,  WCT);
+  let V6  = diff(phiV6,  WCT);
+  let V3R = diff(phiV3R, WCT);
+  let V4R = diff(phiV4R, WCT);
+  let V7  = diff(phiV7,  WCT);
+
+  if(enableFilters){
+    I=applyDiagnosticBand(I,fs); II=applyDiagnosticBand(II,fs); III=applyDiagnosticBand(III,fs);
+    aVR=applyDiagnosticBand(aVR,fs); aVL=applyDiagnosticBand(aVL,fs); aVF=applyDiagnosticBand(aVF,fs);
+    V1=applyDiagnosticBand(V1,fs); V2=applyDiagnosticBand(V2,fs); V3=applyDiagnosticBand(V3,fs);
+    V4=applyDiagnosticBand(V4,fs); V5=applyDiagnosticBand(V5,fs); V6=applyDiagnosticBand(V6,fs);
+    V3R=applyDiagnosticBand(V3R,fs); V4R=applyDiagnosticBand(V4R,fs); V7=applyDiagnosticBand(V7,fs);
+  }
+
+  function toUV(x){
+    const out = new Int16Array(N);
+    for(let i=0;i<N;i++){
+      let v = Math.round(x[i]*1000.0);
+      v = clamp(v, -32768, 32767);
+      out[i] = v;
+    }
+    return out;
+  }
+
+  const leads_uV = {
+    I:toUV(I), II:toUV(II), III:toUV(III),
+    aVR:toUV(aVR), aVL:toUV(aVL), aVF:toUV(aVF),
+    V1:toUV(V1), V2:toUV(V2), V3:toUV(V3), V4:toUV(V4), V5:toUV(V5), V6:toUV(V6),
+    V3R:toUV(V3R), V4R:toUV(V4R), V7:toUV(V7)
+  };
+
+  return {
+    fs, duration_s:duration,
+    targets:{
+      age_years: ageY, dx,
+      HR_bpm: p.HR,
+      PR_ms: Math.round(p.PR*1000),
+      QRS_ms: Math.round(p.QRS*1000),
+      QT_ms: Math.round(QT*1000),
+      QTc_ms: Math.round(p.QTc*1000),
+      axes_deg:{P:p.Paxis, QRS:p.QRSaxis, T:p.Taxis}
+    },
+    leads_uV
+  };
+}
+
+// ---------- physics checks ----------
+function physicsChecks(L){
+  const n = L.I.length;
+  let maxE=0, maxAVR=0, maxAVL=0, maxAVF=0, maxSum=0;
+  for(let i=0;i<n;i++){
+    const I=L.I[i], II=L.II[i], III=L.III[i];
+    const aVR=L.aVR[i], aVL=L.aVL[i], aVF=L.aVF[i];
+    const e = Math.abs((I + III) - II);
+    if(e>maxE) maxE=e;
+    const avr = Math.abs(aVR - (-(I + II)/2));
+    const avl = Math.abs(aVL - ( I - II/2));
+    const avf = Math.abs(aVF - ( II - I/2));
+    const s = Math.abs(aVR + aVL + aVF);
+    if(avr>maxAVR) maxAVR=avr;
+    if(avl>maxAVL) maxAVL=avl;
+    if(avf>maxAVF) maxAVF=avf;
+    if(s>maxSum) maxSum=s;
+  }
+  return {
+    einthoven_max_abs_error_uV: Math.round(maxE),
+    avr_relation_max_abs_error_uV: Math.round(maxAVR),
+    avl_relation_max_abs_error_uV: Math.round(maxAVL),
+    avf_relation_max_abs_error_uV: Math.round(maxAVF),
+    augmented_sum_max_abs_error_uV: Math.round(maxSum),
+  };
+}
+
+// ---------- R peak detection (lead II) ----------
+function detectRPeaks(meta){
+  const fs = meta.fs;
+  const x = meta.leads_uV.II;
+  const n = x.length;
+  const sq = new Float64Array(n);
+  for(let i=1;i<n;i++){
+    const d = x[i] - x[i-1];
+    sq[i] = d*d;
+  }
+  const win = Math.max(1, Math.floor(0.08*fs));
+  const mwa = new Float64Array(n);
+  let s = 0;
+  for(let i=0;i<n;i++){
+    s += sq[i];
+    if(i>=win) s -= sq[i-win];
+    mwa[i] = s / win;
+  }
+  let maxM = 0;
+  for(let i=0;i<n;i++) if(mwa[i]>maxM) maxM = mwa[i];
+  const thr = 0.35 * maxM;
+  const refractory = Math.floor(0.25*fs);
+
+  const rPeaks = [];
+  let i = win;
+  while(i < n-2){
+    if(mwa[i] > thr && mwa[i] > mwa[i-1] && mwa[i] >= mwa[i+1]){
+      const L = Math.max(0, i - Math.floor(0.05*fs));
+      const R = Math.min(n-1, i + Math.floor(0.05*fs));
+      let best = -1, r = i;
+      for(let k=L;k<=R;k++){
+        const a = Math.abs(x[k]);
+        if(a > best){ best=a; r=k; }
+      }
+      if(rPeaks.length===0 || r - rPeaks[rPeaks.length-1] > Math.floor(0.30*fs)) rPeaks.push(r);
+      i = r + refractory;
+    } else i++;
+  }
+  return rPeaks;
+}
+
+// ---------- median beat constructor ----------
+function buildMedianBeat(meta, rPeaks, preSec=0.25, postSec=0.55){
+  const fs = meta.fs;
+  const pre = Math.floor(preSec*fs);
+  const post = Math.floor(postSec*fs);
+  const L = pre + post + 1;
+
+  const leads = Object.keys(meta.leads_uV);
+  const segments = {};
+  for(const lead of leads) segments[lead] = [];
+
+  const validR = [];
+  for(const r of rPeaks){
+    const s0 = r - pre;
+    const s1 = r + post;
+    if(s0 < 0 || s1 >= meta.leads_uV.II.length) continue;
+    validR.push(r);
+    for(const lead of leads){
+      const seg = meta.leads_uV[lead].slice(s0, s1+1); // Int16Array copy
+      segments[lead].push(seg);
+    }
+  }
+
+  const nb = validR.length;
+  if(nb < 3){
+    return { ok:false, reason:"Not enough clean beats for median", beatsUsed:nb };
+  }
+
+  const medianLeads = {};
+  for(const lead of leads){
+    const segs = segments[lead];
+    const med = new Int16Array(L);
+    const tmp = new Array(nb);
+    for(let j=0;j<L;j++){
+      for(let b=0;b<nb;b++) tmp[b] = segs[b][j];
+      tmp.sort((a,b)=>a-b);
+      med[j] = tmp[(nb/2)|0];
+    }
+    medianLeads[lead] = med;
+  }
+
+  const center = pre; // nominal R alignment point
+  // refine R index in median lead II (max abs around center ±20ms)
+  const medII = medianLeads.II;
+  const w = Math.floor(0.020*fs);
+  let rIdx = center, best=-1;
+  for(let i=center-w;i<=center+w;i++){
+    if(i<0 || i>=L) continue;
+    const a = Math.abs(medII[i]);
+    if(a>best){ best=a; rIdx=i; }
+  }
+
+  return {
+    ok:true,
+    fs,
+    pre, post, L,
+    center,
+    rIdxMed: rIdx,
+    beatsUsed: nb,
+    validRPeaks: validR,
+    medianLeads_uV: medianLeads
+  };
+}
+
+// ---------- fiducials on median beat (Lead II) ----------
+function fiducialsFromMedian(medBeat, rrMeanSec){
+  const fs = medBeat.fs;
+  const x = medBeat.medianLeads_uV.II;
+  const L = x.length;
+  const r = medBeat.rIdxMed;
+
+  // baseline before P (e.g. -220 to -180 ms from R)
+  const b0 = r - Math.floor(0.220*fs);
+  const b1 = r - Math.floor(0.180*fs);
+  const base = medianWindow(x, b0, b1);
+
+  const amp = Math.abs(x[r] - base);
+  const thrA = Math.max(30, 0.05*amp); // uV
+
+  // QRS onset: search back to -140 ms
+  let count=0, qOn = Math.max(0, r - Math.floor(0.14*fs));
+  for(let i=r;i>=0;i--){
+    if(i < r - Math.floor(0.16*fs)) break;
+    if(Math.abs(x[i]-base) < thrA) count++; else count=0;
+    if(count >= Math.floor(0.010*fs)){ qOn = i + count; break; }
+  }
+
+  // QRS offset: search forward to +200 ms
+  count=0;
+  let qOff = Math.min(L-1, r + Math.floor(0.20*fs));
+  for(let i=r;i<L;i++){
+    if(i > r + Math.floor(0.22*fs)) break;
+    if(Math.abs(x[i]-base) < thrA) count++; else count=0;
+    if(count >= Math.floor(0.010*fs)){ qOff = i - count; break; }
+  }
+
+  // P onset (optional): window qOn-200ms to qOn-40ms
+  const pL = Math.max(0, qOn - Math.floor(0.20*fs));
+  const pR = Math.max(0, qOn - Math.floor(0.04*fs));
+  let pOn = null;
+  if(pR > pL + 10){
+    const pBase = medianWindow(x, qOn - Math.floor(0.26*fs), qOn - Math.floor(0.22*fs));
+    let peakAmp=0, peakIdx=null;
+    for(let i=pL;i<=pR;i++){
+      const a = Math.abs(x[i]-pBase);
+      if(a>peakAmp){ peakAmp=a; peakIdx=i; }
+    }
+    if(peakAmp >= 25){
+      const thrP = Math.max(15, 0.10*peakAmp);
+      count=0; let pon=pL;
+      for(let i=peakIdx;i>=pL;i--){
+        if(Math.abs(x[i]-pBase) < thrP) count++; else count=0;
+        if(count >= Math.floor(0.008*fs)){ pon = i + count; break; }
+      }
+      pOn = pon;
+    }
+  }
+
+  // T end (optional)
+  const rr = rrMeanSec || 0.60;
+  const tL = Math.min(L-1, qOff + Math.floor(0.06*fs));
+  const tR = Math.min(L-1, qOn + Math.floor(Math.min(0.8*rr, 0.60)*fs));
+  let tEnd = null;
+  if(tR > tL + 30){
+    let peakAmp=0, peakIdx=null;
+    for(let i=tL;i<=tR;i++){
+      const a = Math.abs(x[i]-base);
+      if(a>peakAmp){ peakAmp=a; peakIdx=i; }
+    }
+    if(peakAmp >= 40){
+      const thrT = Math.max(20, 0.10*peakAmp);
+      count=0; let tend=tR;
+      for(let i=peakIdx;i<=tR;i++){
+        if(Math.abs(x[i]-base) < thrT) count++; else count=0;
+        if(count >= Math.floor(0.020*fs)){ tend = i - count; break; }
+      }
+      tEnd = tend;
+    }
+  }
+
+  // Relative offsets (to median R index)
+  const rel = (idx)=> (idx==null) ? null : (idx - r);
+  return {
+    med_base_uV: base,
+    med_rIdx: r,
+    med_qOn: qOn, med_qOff: qOff, med_pOn: pOn, med_tEnd: tEnd,
+    rel_qOn: rel(qOn), rel_qOff: rel(qOff), rel_pOn: rel(pOn), rel_tEnd: rel(tEnd)
+  };
+}
+
+function buildFullFiducialsFromMedian(meta, rPeaks, medFids){
+  const fs = meta.fs;
+  const n = meta.leads_uV.II.length;
+  const qOn=[], qOff=[], pOn=[], tEnd=[];
+  for(const r of rPeaks){
+    const on = (medFids.rel_qOn==null) ? null : clamp(r + medFids.rel_qOn, 0, n-1);
+    const off = (medFids.rel_qOff==null) ? null : clamp(r + medFids.rel_qOff, 0, n-1);
+    const pon = (medFids.rel_pOn==null) ? null : clamp(r + medFids.rel_pOn, 0, n-1);
+    const tend = (medFids.rel_tEnd==null) ? null : clamp(r + medFids.rel_tEnd, 0, n-1);
+    qOn.push(on); qOff.push(off); pOn.push(pon); tEnd.push(tend);
+  }
+  return { rPeaks, qOn, qOff, pOn, tEnd };
+}
+
+// ---------- global measurements (median beat or per-beat) ----------
+function computeAxesFromMedian(medBeat, medFids){
+  const fs = medBeat.fs;
+  const I = medBeat.medianLeads_uV.I;
+  const aVF = medBeat.medianLeads_uV.aVF;
+
+  const r = medFids.med_rIdx;
+  const qOn = medFids.med_qOn, qOff = medFids.med_qOff;
+  const pOn = medFids.med_pOn, tEnd = medFids.med_tEnd;
+
+  // baseline from II baseline is fine; compute for I/aVF similarly
+  const baseI = medianWindow(I, r - Math.floor(0.220*fs), r - Math.floor(0.180*fs));
+  const baseF = medianWindow(aVF, r - Math.floor(0.220*fs), r - Math.floor(0.180*fs));
+
+  function area(arr, b, e, base){
+    b = clamp(b, 0, arr.length-1);
+    e = clamp(e, 0, arr.length-1);
+    if(e <= b) return 0;
+    let s=0;
+    for(let i=b;i<=e;i++) s += (arr[i]-base);
+    return s;
+  }
+
+  const qAreaI = area(I, qOn, qOff, baseI);
+  const qAreaF = area(aVF, qOn, qOff, baseF);
+
+  let pAreaI=0, pAreaF=0;
+  if(pOn!=null){
+    const pEnd = Math.max(pOn, qOn - Math.floor(0.04*fs));
+    pAreaI = area(I, pOn, pEnd, baseI);
+    pAreaF = area(aVF, pOn, pEnd, baseF);
+  }
+
+  let tAreaI=0, tAreaF=0;
+  if(tEnd!=null){
+    const tStart = qOff + Math.floor(0.06*fs);
+    tAreaI = area(I, tStart, tEnd, baseI);
+    tAreaF = area(aVF, tStart, tEnd, baseF);
+  }
+
+  function axisFromAreas(ax, ay){
+    if(ax==0 && ay==0) return null;
+    let ang = Math.atan2(ay, ax) * 180/Math.PI;
+    if(ang > 180) ang -= 360;
+    if(ang <= -180) ang += 360;
+    return ang;
+  }
+  return { pAxis: axisFromAreas(pAreaI, pAreaF),
+           qAxis: axisFromAreas(qAreaI, qAreaF),
+           tAxis: axisFromAreas(tAreaI, tAreaF) };
+}
+
+function computeGlobalMeasurements(meta, rPeaks, medBeat, medFids){
+  const fs = meta.fs;
+
+  // HR from mean RR
+  let rr=null, hr=null;
+  if(rPeaks.length>=2){
+    const rrs=[];
+    for(let i=1;i<rPeaks.length;i++) rrs.push((rPeaks[i]-rPeaks[i-1])/fs);
+    rr = mean(rrs);
+    hr = 60/rr;
+  }
+
+  // PR/QRS/QT from median beat fiducials
+  let PR=null, QRS=null, QT=null;
+  if(medBeat && medBeat.ok && medFids){
+    if(medFids.med_pOn!=null) PR = (medFids.med_qOn - medFids.med_pOn)/fs*1000;
+    QRS = (medFids.med_qOff - medFids.med_qOn)/fs*1000;
+    if(medFids.med_tEnd!=null) QT = (medFids.med_tEnd - medFids.med_qOn)/fs*1000;
+  }
+
+  // QTc formulas from mean RR + median QT
+  let QTcB=null, QTcF=null, QTcFram=null;
+  if(rr!=null && QT!=null){
+    const QTsec = QT/1000.0;
+    QTcB = (QTsec/Math.sqrt(rr))*1000.0;
+    QTcF = (QTsec/Math.cbrt(rr))*1000.0;
+    QTcFram = (QTsec + 0.154*(1 - rr))*1000.0;
+  }
+
+  // Axes from median beat areas
+  let axes = {pAxis:null,qAxis:null,tAxis:null};
+  if(medBeat && medBeat.ok && medFids){
+    axes = computeAxesFromMedian(medBeat, medFids);
+  }
+
+  return { rr, hr, PR, QRS, QT, QTcB, QTcF, QTcFram, axes };
+}
+
+// ---------- viewer rendering ----------
+const leads15 = ["I","II","III","aVR","aVL","aVF","V1","V2","V3","V4","V5","V6","V3R","V4R","V7"];
+const printGrid = [
+  ["I","aVR","V1","V4"],
+  ["II","aVL","V2","V5"],
+  ["III","aVF","V3","V6"],
+];
+
+const elAge = document.getElementById("ageYears");
+const elDx  = document.getElementById("dx");
+const elSeed= document.getElementById("seed");
+const elNoise = document.getElementById("noise");
+const elFilters = document.getElementById("filters");
+const elLayout = document.getElementById("layout");
+const elSpeed  = document.getElementById("speed");
+const elGain   = document.getElementById("gain");
+const elPxmm   = document.getElementById("pxmm");
+const elFid    = document.getElementById("fid");
+const elSnap   = document.getElementById("snap");
+const elMedian = document.getElementById("median");
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", {alpha:false});
+function resizeCanvas(){
+  const cssW = canvas.clientWidth || 1200;
+  const cssH = canvas.clientHeight || 920;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resizeCanvas();
+window.addEventListener("resize", ()=>{ resizeCanvas(); draw(); });
+
+let META=null;      // {fs,duration_s,targets,leads_uV, integrity}
+let rPeaks=[];
+let MED=null;       // median beat object
+let medFids=null;   // fiducials on median beat
+let FID=null;       // full-trace fiducials derived from median offsets
+let MEAS=null;      // global measurements
+
+let calipers=false;
+let calPoints=[];
+let t0=0;
+let drag=null;
+
+function pxPerMm(){
+  const mode = elPxmm.value;
+  if(mode !== "4") return +mode;
+  const w = canvas.clientWidth;
+  const speed = +elSpeed.value;
+  const leftPad = 70, rightPad = 10;
+  if(elLayout.value==="print12"){
+    const totalSec = (speed===25) ? 10.0 : 5.0;
+    return (w - leftPad - rightPad) / (speed*totalSec);
+  } else {
+    const winSec = 4.0;
+    return (w - leftPad - rightPad) / (speed*winSec);
+  }
+}
+function speed(){ return +elSpeed.value; }
+function gain(){ return +elGain.value; }
+function pxPerSec(){ return speed()*pxPerMm(); }
+function pxPerUv(){ return (gain()*pxPerMm())/1000.0; }
+function windowSeconds(){ return canvas.clientWidth / pxPerSec(); }
+function clampT0(){
+  if(!META) return;
+  const total = META.duration_s;
+  const win = windowSeconds();
+  if(win >= total){ t0=0; return; }
+  t0 = clamp(t0, 0, total-win);
+}
+
+function drawGrid(){
+  const w=canvas.clientWidth, h=canvas.clientHeight;
+  const mm=pxPerMm();
+  const small=mm, big=mm*5;
+  ctx.save();
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--paper');
+  ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--grid1');
+  ctx.lineWidth=1;
+  for(let x=0;x<=w;x+=small){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+  for(let y=0;y<=h;y+=small){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--grid5');
+  ctx.lineWidth=1.25;
+  for(let x=0;x<=w;x+=big){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+  for(let y=0;y<=h;y+=big){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+  ctx.restore();
+}
+function drawCalibrationPulse(x0,y0){
+  const ampUv=1000;
+  const height=ampUv*pxPerUv();
+  const w200=0.2*pxPerSec();
+  const w50=0.05*pxPerSec();
+  ctx.save();
+  ctx.strokeStyle="rgba(20,20,20,0.55)";
+  ctx.lineWidth=1.1;
+  ctx.beginPath();
+  ctx.moveTo(x0,y0);
+  ctx.lineTo(x0+w50,y0);
+  ctx.lineTo(x0+w50,y0-height);
+  ctx.lineTo(x0+w50+w200,y0-height);
+  ctx.lineTo(x0+w50+w200,y0);
+  ctx.lineTo(x0+w50+w200+w50,y0);
+  ctx.stroke();
+  ctx.restore();
+}
+function drawLeadMinMax(arr, startIdx, n, x0, baselineY, widthPx){
+  const pps = pxPerSec();
+  const ppu = pxPerUv();
+  const spp = META.fs / pps;
+  const maxX = Math.floor(widthPx);
+  ctx.beginPath();
+  for(let px=0; px<maxX; px++){
+    const i0 = startIdx + Math.floor(px * spp);
+    const i1 = startIdx + Math.floor((px+1) * spp);
+    if(i0>=startIdx+n) break;
+    const j0 = Math.max(startIdx, i0);
+    const j1 = Math.min(startIdx+n, Math.max(i1, j0+1));
+    let mn = arr[j0], mx = arr[j0];
+    for(let k=j0+1;k<j1;k++){
+      const v = arr[k];
+      if(v<mn) mn=v;
+      if(v>mx) mx=v;
+    }
+    const x = x0 + px;
+    const y1 = baselineY - mx*ppu;
+    const y2 = baselineY - mn*ppu;
+    ctx.moveTo(x, y1);
+    ctx.lineTo(x, y2);
+  }
+  ctx.stroke();
+}
+function drawFiducialsStacked(leftPad, rightPad){
+  if(!FID || !elFid.checked) return;
+  const w = canvas.clientWidth;
+  const pps = pxPerSec();
+  const win = windowSeconds();
+  const startIdx = Math.floor(t0*META.fs);
+  const endIdx = startIdx + Math.floor(win*META.fs);
+
+  function xOf(idx){ return leftPad + ((idx-startIdx)/META.fs)*pps; }
+
+  ctx.save();
+  // QRS on/off (blue)
+  ctx.strokeStyle="rgba(27,109,255,0.16)";
+  ctx.lineWidth=1;
+  for(let k=0;k<FID.qOn.length;k++){
+    const on=FID.qOn[k], off=FID.qOff[k];
+    if(on!=null && on>=startIdx && on<=endIdx){
+      const x=xOf(on); if(x>=leftPad && x<=w-rightPad){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.clientHeight); ctx.stroke(); }
+    }
+    if(off!=null && off>=startIdx && off<=endIdx){
+      const x=xOf(off); if(x>=leftPad && x<=w-rightPad){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.clientHeight); ctx.stroke(); }
+    }
+  }
+  // R peaks (black)
+  ctx.strokeStyle="rgba(0,0,0,0.14)";
+  for(const r of FID.rPeaks){
+    if(r>=startIdx && r<=endIdx){
+      const x=xOf(r); if(x>=leftPad && x<=w-rightPad){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.clientHeight); ctx.stroke(); }
+    }
+  }
+  ctx.restore();
+}
+function drawStacked(){
+  clampT0();
+  drawGrid();
+  const w=canvas.clientWidth, h=canvas.clientHeight;
+  const win=windowSeconds();
+  const startIdx=Math.floor(t0*META.fs);
+  const n=Math.min(Math.floor(win*META.fs), META.leads_uV.I.length-startIdx);
+  const topPad=18, leftPad=70, rightPad=10;
+  const usableW = w - leftPad - rightPad;
+  const usableH = h - topPad - 18;
+  const rowH = usableH / leads15.length;
+
+  ctx.save();
+  ctx.font="13px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--text');
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--trace');
+  ctx.lineWidth=1.0;
+
+  for(let li=0; li<leads15.length; li++){
+    const L=leads15[li];
+    const baseline = topPad + (li+0.72)*rowH;
+    ctx.fillText(L, 12, baseline+4);
+    drawCalibrationPulse(leftPad, baseline);
+    drawLeadMinMax(META.leads_uV[L], startIdx, n, leftPad, baseline, usableW);
+  }
+  ctx.restore();
+
+  drawFiducialsStacked(leftPad, rightPad);
+  document.getElementById("windowInfo").textContent = `Stacked: ${t0.toFixed(2)}–${(t0+win).toFixed(2)} s`;
+}
+function drawPrint12(){
+  drawGrid();
+  const w=canvas.clientWidth, h=canvas.clientHeight;
+  const leftPad=62, rightPad=10, topPad=18, bottomPad=18;
+  const colW = (w - leftPad - rightPad)/4.0;
+  const rowH = (h - topPad - bottomPad)/4.0;
+  const segSec = colW / pxPerSec();
+  const totalSec = segSec*4;
+
+  ctx.save();
+  ctx.font="13px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--text');
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--trace');
+  ctx.lineWidth=1.0;
+
+  function drawCell(lead, r, c){
+    const x0 = leftPad + c*colW;
+    const y0 = topPad + r*rowH;
+    const baseline = y0 + rowH*0.68;
+    ctx.fillText(lead, x0+6, y0+14);
+    drawCalibrationPulse(x0+6, baseline);
+    const startIdx = 0; // synchronous
+    const n = Math.min(Math.floor(segSec*META.fs), META.leads_uV[lead].length - startIdx);
+    drawLeadMinMax(META.leads_uV[lead], startIdx, n, x0, baseline, colW);
+  }
+  for(let r=0;r<3;r++){
+    for(let c=0;c<4;c++){
+      drawCell(printGrid[r][c], r, c);
+    }
+  }
+  const x0=leftPad;
+  const y0=topPad + 3*rowH;
+  const baseline = y0 + rowH*0.68;
+  ctx.fillText("II (rhythm)", x0+6, y0+14);
+  drawCalibrationPulse(x0+6, baseline);
+  const n = Math.min(Math.floor(totalSec*META.fs), META.leads_uV.II.length);
+  drawLeadMinMax(META.leads_uV.II, 0, n, x0, baseline, (w-leftPad-rightPad));
+  ctx.restore();
+
+  document.getElementById("windowInfo").textContent = `Print: ${totalSec.toFixed(2)} s across rhythm strip`;
+}
+
+// ---------- calipers mapping + snapping ----------
+function snapIndex(idx, tol, winStart, winEnd){
+  if(!FID || !elSnap.checked) return idx;
+  const candidates = [];
+  function pushIf(arr){
+    for(const v of arr){
+      if(v==null) continue;
+      if(v < winStart || v > winEnd) continue;
+      candidates.push(v);
+    }
+  }
+  pushIf(FID.pOn);
+  pushIf(FID.qOn);
+  pushIf(FID.rPeaks);
+  pushIf(FID.qOff);
+  pushIf(FID.tEnd);
+
+  if(candidates.length===0) return idx;
+  let best = idx, bestD = tol+1;
+  for(const c of candidates){
+    const d = Math.abs(c-idx);
+    if(d < bestD){ bestD=d; best=c; }
+  }
+  return (bestD <= tol) ? best : idx;
+}
+
+function pointFromClick(x, y){
+  if(!META) return null;
+  const pps = pxPerSec();
+  const ppu = pxPerUv();
+  const fs = META.fs;
+
+  if(elLayout.value==="stacked"){
+    const w=canvas.clientWidth, h=canvas.clientHeight;
+    const topPad=18, leftPad=70, rightPad=10;
+    const usableH = h - topPad - 18;
+    const rowH = usableH / leads15.length;
+    const li = clamp(Math.floor((y - topPad) / rowH), 0, leads15.length-1);
+    const lead = leads15[li];
+    const baseline = topPad + (li+0.72)*rowH;
+
+    const time = t0 + (x - leftPad)/pps;
+    const timeClamped = clamp(time, 0, META.duration_s);
+    let idx = Math.round(timeClamped*fs);
+    idx = clamp(idx, 0, META.leads_uV[lead].length-1);
+
+    const tol = Math.max(Math.floor(0.02*fs), Math.floor((10/pps)*fs));
+    idx = snapIndex(idx, tol, 0, META.leads_uV[lead].length-1);
+
+    const uv = META.leads_uV[lead][idx];
+    const yWave = baseline - uv*ppu;
+    // recompute x from idx if snapped
+    const xWave = leftPad + ((idx - Math.floor(t0*fs))/fs)*pps;
+    return {lead, time_s: idx/fs, idx, uv, x:xWave, y:yWave};
+  } else {
+    // print mode mapping (synchronous small windows + rhythm strip)
+    const w=canvas.clientWidth, h=canvas.clientHeight;
+    const leftPad=62, rightPad=10, topPad=18, bottomPad=18;
+    const colW = (w - leftPad - rightPad)/4.0;
+    const rowH = (h - topPad - bottomPad)/4.0;
+    const segSec = colW / pps;
+    const totalSec = segSec*4;
+
+    const r = clamp(Math.floor((y - topPad)/rowH), 0, 3);
+    if(r < 3){
+      const c = clamp(Math.floor((x - leftPad)/colW), 0, 3);
+      const lead = printGrid[r][c];
+      const x0 = leftPad + c*colW;
+      const y0 = topPad + r*rowH;
+      const baseline = y0 + rowH*0.68;
+
+      let time = (x - x0)/pps;
+      time = clamp(time, 0, segSec);
+      let idx = Math.round(time*fs);
+      idx = clamp(idx, 0, META.leads_uV[lead].length-1);
+
+      const tol = Math.max(Math.floor(0.02*fs), Math.floor((10/pps)*fs));
+      idx = snapIndex(idx, tol, 0, Math.floor(segSec*fs));
+
+      const uv = META.leads_uV[lead][idx];
+      const yWave = baseline - uv*ppu;
+      const xWave = x0 + (idx/fs)*pps;
+      return {lead, time_s: idx/fs, idx, uv, x:xWave, y:yWave};
+    } else {
+      const lead="II";
+      const x0 = leftPad;
+      const y0 = topPad + 3*rowH;
+      const baseline = y0 + rowH*0.68;
+
+      let time = (x - x0)/pps;
+      time = clamp(time, 0, totalSec);
+      let idx = Math.round(time*fs);
+      idx = clamp(idx, 0, META.leads_uV[lead].length-1);
+
+      const tol = Math.max(Math.floor(0.02*fs), Math.floor((10/pps)*fs));
+      idx = snapIndex(idx, tol, 0, Math.floor(totalSec*fs));
+
+      const uv = META.leads_uV[lead][idx];
+      const yWave = baseline - uv*ppu;
+      const xWave = x0 + (idx/fs)*pps;
+      return {lead, time_s: idx/fs, idx, uv, x:xWave, y:yWave};
+    }
+  }
+}
+
+function drawCalipers(){
+  if(calPoints.length!==2) return;
+  const p0=calPoints[0], p1=calPoints[1];
+  ctx.save();
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent');
+  ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke();
+
+  const dt = (p1.time_s - p0.time_s);
+  const dv_mv = (p1.uv - p0.uv)/1000.0;
+
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent');
+  ctx.font="13px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  const label = `Δt ${(dt*1000).toFixed(1)} ms   ΔV ${dv_mv.toFixed(3)} mV`;
+  ctx.fillText(label, Math.min(p0.x,p1.x)+10, Math.min(p0.y,p1.y)-10);
+  ctx.restore();
+}
+
+// ---------- update measurement panel ----------
+function updateUI(){
+  if(!META) return;
+  const ei = META.integrity;
+  const ok = (ei.einthoven_max_abs_error_uV<=2 &&
+              ei.avr_relation_max_abs_error_uV<=2 &&
+              ei.avl_relation_max_abs_error_uV<=2 &&
+              ei.avf_relation_max_abs_error_uV<=2 &&
+              ei.augmented_sum_max_abs_error_uV<=2);
+
+  document.getElementById("physicsPill").innerHTML = ok ? `<span class="ok">Physics OK</span>` : `<span class="bad">Physics drift</span>`;
+  const physText = `Einthoven ${ei.einthoven_max_abs_error_uV}µV • aVR ${ei.avr_relation_max_abs_error_uV}µV • aVL ${ei.avl_relation_max_abs_error_uV}µV • aVF ${ei.avf_relation_max_abs_error_uV}µV • Σaug ${ei.augmented_sum_max_abs_error_uV}µV`;
+  document.getElementById("m_phys").innerHTML = ok ? `<span class="ok">${physText}</span>` : `<span class="bad">${physText}</span>`;
+
+  document.getElementById("m_dx").textContent = META.targets.dx || "—";
+  document.getElementById("m_age").textContent = (META.targets.age_years!=null) ? `${META.targets.age_years} y` : "—";
+
+  // HR, intervals, QTc
+  if(MEAS){
+    document.getElementById("m_hr").textContent = fmtBpm(MEAS.hr);
+    document.getElementById("m_pr").textContent = (MEAS.PR==null) ? "N/A" : fmtMs(MEAS.PR);
+    document.getElementById("m_qrs").textContent = (MEAS.QRS==null) ? "—" : fmtMs(MEAS.QRS);
+    document.getElementById("m_qt").textContent = (MEAS.QT==null) ? "—" : fmtMs(MEAS.QT);
+    const qtc = (MEAS.QTcB==null) ? "—" :
+      `${Math.round(MEAS.QTcB)} / ${Math.round(MEAS.QTcF)} / ${Math.round(MEAS.QTcFram)} ms`;
+    document.getElementById("m_qtc").textContent = qtc;
+
+    const ax = MEAS.axes;
+    document.getElementById("m_axes").textContent = `${fmtDeg(ax.pAxis)} / ${fmtDeg(ax.qAxis)} / ${fmtDeg(ax.tAxis)}`;
+  }
+
+  document.getElementById("m_medianbeats").textContent = (MED && MED.ok) ? `${MED.beatsUsed} beats` : "—";
+  document.getElementById("m_fidsrc").textContent = (elMedian.checked) ? "Median-derived offsets" : "Per-beat detection (legacy)";
+  if(medFids){
+    const toMs = (rel)=> (rel==null) ? "—" : `${Math.round(rel/META.fs*1000)} ms`;
+    const s = `P-on ${toMs(medFids.rel_pOn)} • QRS-on ${toMs(medFids.rel_qOn)} • R 0 • QRS-off ${toMs(medFids.rel_qOff)} • T-end ${toMs(medFids.rel_tEnd)}`;
+    document.getElementById("m_medfids").textContent = s;
+  } else {
+    document.getElementById("m_medfids").textContent = "—";
+  }
+
+  const rrms = (MEAS && MEAS.rr!=null) ? Math.round(MEAS.rr*1000) : "—";
+  document.getElementById("footer").innerHTML =
+    `<b>Median beat enabled:</b> PR/QRS/QT measured on the median complex aligned on R (vendor-style stability). HR from mean RR on full trace.<br>` +
+    `Avg RR: <span class="mono">${rrms} ms</span>. Calipers snap to median-derived fiducials across beats.`;
+}
+
+// ---------- draw ----------
+function draw(){
+  if(!META) return;
+  resizeCanvas();
+  if(elLayout.value==="print12") drawPrint12(); else drawStacked();
+  if(calPoints.length===2) drawCalipers();
+  updateUI();
+}
+
+// ---------- generation pipeline ----------
+function generate(){
+  const age = parseFloat(elAge.value || "4");
+  const dx  = elDx.value;
+  const seed= parseInt(elSeed.value || "7", 10);
+
+  META = synthECG(age, dx, seed, elNoise.checked, elFilters.checked);
+
+  // Physics checks
+  META.integrity = physicsChecks(META.leads_uV);
+
+  // R peaks
+  rPeaks = detectRPeaks(META);
+
+  // Median beat + median fiducials
+  MED = buildMedianBeat(META, rPeaks, 0.25, 0.55);
+  let rrMean = null;
+  if(rPeaks.length>=2){
+    const rrs=[];
+    for(let i=1;i<rPeaks.length;i++) rrs.push((rPeaks[i]-rPeaks[i-1])/META.fs);
+    rrMean = mean(rrs);
+  }
+  medFids = (MED && MED.ok) ? fiducialsFromMedian(MED, rrMean) : null;
+
+  // Full fiducials for overlay/snap
+  if(elMedian.checked && medFids && MED && MED.ok){
+    FID = buildFullFiducialsFromMedian(META, rPeaks, medFids);
+  } else {
+    // Fallback: still use median-derived if available; (keeps behavior predictable)
+    FID = (medFids && MED && MED.ok) ? buildFullFiducialsFromMedian(META, rPeaks, medFids)
+                                     : {rPeaks, qOn:[], qOff:[], pOn:[], tEnd:[]};
+  }
+
+  // Global measurements (from median beat)
+  MEAS = (MED && MED.ok && medFids) ? computeGlobalMeasurements(META, rPeaks, MED, medFids)
+                                   : {rr:rrMean, hr:(rrMean?60/rrMean:null), PR:null, QRS:null, QT:null, QTcB:null, QTcF:null, QTcFram:null, axes:{pAxis:null,qAxis:null,tAxis:null}};
+
+  calPoints=[]; t0=0; drag=null;
+  draw();
+}
+
+// Controls
+document.getElementById("genBtn").onclick = ()=>generate();
+document.getElementById("randBtn").onclick = ()=>{ elSeed.value = Math.max(1, Math.floor(Math.random()*999999)); generate(); };
+
+elLayout.onchange = ()=>{ calPoints=[]; draw(); };
+elSpeed.onchange  = ()=>{ clampT0(); calPoints=[]; draw(); };
+elGain.onchange   = ()=>{ calPoints=[]; draw(); };
+elPxmm.onchange   = ()=>{ clampT0(); calPoints=[]; draw(); };
+elNoise.onchange  = ()=>generate();
+elFilters.onchange= ()=>generate();
+document.getElementById("fid").onchange = ()=>draw();
+document.getElementById("snap").onchange = ()=>draw();
+elMedian.onchange = ()=>generate();
+
+// Calipers
+document.getElementById("calBtn").onclick = ()=>{
+  calipers=!calipers;
+  calPoints=[];
+  document.getElementById("calBtn").textContent="Calipers: "+(calipers?"ON":"OFF");
+  draw();
+};
+document.getElementById("clearBtn").onclick = ()=>{ calPoints=[]; draw(); };
+window.addEventListener("keydown",(e)=>{
+  if(e.key.toLowerCase()==="c"){
+    calipers=!calipers;
+    calPoints=[];
+    document.getElementById("calBtn").textContent="Calipers: "+(calipers?"ON":"OFF");
+    draw();
+  }
+});
+
+// Pan/zoom (stacked)
+canvas.addEventListener("mousedown",(e)=>{
+  if(elLayout.value!=="stacked") return;
+  const r=canvas.getBoundingClientRect();
+  drag={x:e.clientX-r.left, t0:t0};
+});
+window.addEventListener("mouseup",()=>{drag=null;});
+window.addEventListener("mousemove",(e)=>{
+  if(!drag || elLayout.value!=="stacked") return;
+  const r=canvas.getBoundingClientRect();
+  const x=e.clientX-r.left;
+  const dx=(x-drag.x);
+  t0 = drag.t0 - (dx/pxPerSec());
+  clampT0();
+  draw();
+});
+canvas.addEventListener("wheel",(e)=>{
+  e.preventDefault();
+  const vals=["4","6","8"];
+  const i=vals.indexOf(elPxmm.value);
+  const dir=Math.sign(e.deltaY);
+  let ni=i+(dir>0?-1:1);
+  ni=Math.max(0,Math.min(vals.length-1,ni));
+  if(ni!==i){
+    if(elLayout.value==="stacked"){
+      const center=t0+windowSeconds()/2;
+      elPxmm.value=vals[ni];
+      t0=center-windowSeconds()/2;
+      clampT0();
+    } else {
+      elPxmm.value=vals[ni];
+    }
+    draw();
+  }
+},{passive:false});
+
+// Calipers click
+canvas.addEventListener("click",(e)=>{
+  if(!calipers) return;
+  const r=canvas.getBoundingClientRect();
+  const p = pointFromClick(e.clientX-r.left, e.clientY-r.top);
+  if(!p) return;
+  calPoints.push(p);
+  if(calPoints.length>2) calPoints=[calPoints[calPoints.length-2], calPoints[calPoints.length-1]];
+  draw();
+});
+
+// Export
+function downloadText(name, text){
+  const blob = new Blob([text], {type:"text/plain"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href=url; a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+document.getElementById("jsonBtn").onclick = ()=>{
+  if(!META) return;
+  const out = {
+    ...META,
+    rPeaks,
+    medianBeat: (MED && MED.ok) ? {
+      fs: MED.fs, pre: MED.pre, post: MED.post, rIdxMed: MED.rIdxMed, beatsUsed: MED.beatsUsed,
+      leads_uV: Object.fromEntries(Object.entries(MED.medianLeads_uV).map(([k,v])=>[k, Array.from(v)]))
+    } : null,
+    medianFiducials: medFids,
+    fiducials: FID,
+    auto_measurements: MEAS,
+    leads_uV: Object.fromEntries(Object.entries(META.leads_uV).map(([k,v])=>[k, Array.from(v)]))
+  };
+  downloadText(`ecg_${META.targets.dx.replace(/[^a-z0-9]+/gi,'_')}_age${META.targets.age_years}_median.json`, JSON.stringify(out));
+};
+document.getElementById("csvBtn").onclick = ()=>{
+  if(!META) return;
+  const N = META.leads_uV.I.length;
+  const cols = ["time_s", ...leads15];
+  let s = cols.join(",") + "\n";
+  for(let i=0;i<N;i++){
+    const row = [(i/META.fs).toFixed(3)];
+    for(const L of leads15){ row.push(META.leads_uV[L][i]); }
+    s += row.join(",") + "\n";
+  }
+  downloadText(`ecg_${META.targets.dx.replace(/[^a-z0-9]+/gi,'_')}_age${META.targets.age_years}.csv`, s);
+};
+
+// init
+generate();
+</script>
+</body>
+</html>
