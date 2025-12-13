@@ -1,0 +1,51 @@
+name: Check ECG-Digitiser Weights
+
+on:
+  schedule:
+    # Run daily at 9am UTC (1am PST / 4am EST)
+    - cron: '0 9 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-weights:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check LFS availability
+        id: check
+        run: |
+          # Try to download just the LFS pointer info (not full file)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://github.com/felixkrones/ECG-Digitiser/raw/main/models/M1/nnUNet_results/Dataset500_Signals/nnUNetTrainer__nnUNetPlans__2d/fold_0/checkpoint_final.pth")
+
+          echo "HTTP response: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "✅ Weights appear to be available!"
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "❌ Weights still unavailable (HTTP $HTTP_CODE)"
+          fi
+
+      - name: Create notification issue
+        if: steps.check.outputs.available == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Check if notification issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'ecg-digitiser-available',
+              state: 'open'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🎉 ECG-Digitiser weights are now available!',
+                body: `The daily check detected that ECG-Digitiser model weights are downloadable again.\n\nRun this to set up:\n\`\`\`bash\nbash tools/test-ecg-digitiser.sh\ncd /tmp/ecg-digitiser-test/repo\ngit lfs pull\n\`\`\`\n\nOnce confirmed working, you can disable this workflow.`,
+                labels: ['ecg-digitiser-available']
+              });
+            }
