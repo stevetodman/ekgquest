@@ -696,7 +696,7 @@ async function run() {
     assert.strictEqual(ecg.duration_s, 10.0, "Duration should be 10s");
     assert.ok(ecg.targets.synthetic === true, "Should be marked synthetic");
     assert.ok(ecg.targets.generator_version, "Should have generator version");
-    assert.ok(ecg.targets.generator_version.includes("device"), "Generator version should include 'device'");
+    assert.ok(ecg.targets.generator_version.includes("calibrated"), "Generator version should include 'calibrated'");
 
     // Verify HRV metrics are included in output
     assert.ok(ecg.targets.hrv, "Should include HRV metrics in targets");

@@ -86,6 +86,18 @@ export const PEDIATRIC_PRIORS = {
   morphology: {
     rvDom: [{ age: 0, mean: 1.0, sd: 0.05 }, { age: 0.5, mean: 0.9, sd: 0.08 }, { age: 1, mean: 0.8, sd: 0.1 }, { age: 3, mean: 0.6, sd: 0.12 }, { age: 8, mean: 0.4, sd: 0.12 }, { age: 12, mean: 0.25, sd: 0.1 }, { age: 16, mean: 0.15, sd: 0.08 }],
     juvenileT: [{ age: 0, mean: 1.0, sd: 0.05 }, { age: 1, mean: 0.9, sd: 0.08 }, { age: 4, mean: 0.75, sd: 0.12 }, { age: 8, mean: 0.5, sd: 0.15 }, { age: 12, mean: 0.25, sd: 0.12 }, { age: 16, mean: 0.1, sd: 0.08 }],
+    // Rijnbeek 2001 R-wave amplitude targets (mV, median values, averaged M/F)
+    // Source: Eur Heart J 2001;22:702-711, Table 5
+    rijnbeekTargets: [
+      { age: 0, V1: 1.22, V2: 1.83, V3: 1.80, V4: 1.74, V5: 1.35, V6: 0.97, I: 0.28, II: 0.67, III: 0.82, aVL: 0.17, aVF: 0.66 },
+      { age: 0.17, V1: 1.20, V2: 1.82, V3: 2.00, V4: 2.28, V5: 1.90, V6: 1.53, I: 0.56, II: 1.12, III: 0.84, aVL: 0.30, aVF: 0.93 },
+      { age: 0.75, V1: 1.07, V2: 1.88, V3: 2.05, V4: 2.25, V5: 1.95, V6: 1.69, I: 0.56, II: 1.15, III: 0.87, aVL: 0.28, aVF: 0.99 },
+      { age: 2, V1: 1.05, V2: 1.79, V3: 2.00, V4: 2.29, V5: 2.00, V6: 1.74, I: 0.55, II: 1.20, III: 0.88, aVL: 0.26, aVF: 1.02 },
+      { age: 4, V1: 0.86, V2: 1.50, V3: 1.90, V4: 2.33, V5: 2.10, V6: 1.92, I: 0.53, II: 1.25, III: 0.90, aVL: 0.24, aVF: 1.05 },
+      { age: 6.5, V1: 0.59, V2: 1.14, V3: 1.55, V4: 1.98, V5: 2.00, V6: 2.01, I: 0.56, II: 1.29, III: 0.92, aVL: 0.20, aVF: 1.10 },
+      { age: 10, V1: 0.52, V2: 0.96, V3: 1.40, V4: 1.79, V5: 1.95, V6: 2.09, I: 0.57, II: 1.36, III: 0.91, aVL: 0.17, aVF: 1.13 },
+      { age: 14, V1: 0.42, V2: 0.82, V3: 1.20, V4: 1.56, V5: 1.75, V6: 1.84, I: 0.53, II: 1.32, III: 0.87, aVL: 0.18, aVF: 1.08 },
+    ],
   },
   sex_adjustments: {
     male: { QTc_offset: -0.01, QRS_factor: 1.05, voltage_factor: 1.1 },
@@ -131,6 +143,71 @@ function interpMorphology(ageY, ageArray) {
     }
   }
   return { mean: ageArray[0].mean, sd: ageArray[0].sd };
+}
+
+/**
+ * Get age-dependent amplitude scale factor (Rijnbeek 2001 calibration)
+ * Includes base multiplier and age-dependent scaling
+ * @param {number} ageY - Age in years
+ * @returns {number} Total amplitude scaling factor
+ */
+/**
+ * Interpolate a factor from age-anchored array
+ */
+function interpFactor(ageY, anchors) {
+  if (ageY <= anchors[0].age) return anchors[0].factor;
+  if (ageY >= anchors[anchors.length - 1].age) return anchors[anchors.length - 1].factor;
+
+  for (let i = 0; i < anchors.length - 1; i++) {
+    if (ageY >= anchors[i].age && ageY < anchors[i + 1].age) {
+      const t = (ageY - anchors[i].age) / (anchors[i + 1].age - anchors[i].age);
+      return lerp(anchors[i].factor, anchors[i + 1].factor, t);
+    }
+  }
+  return 1.0;
+}
+
+// Pre-computed calibration factors: target / raw baseline
+// Based on Rijnbeek 2001 targets and measured VCG projection baselines
+const CALIBRATION_FACTORS = [
+  { age: 0, V1: 1.24, V2: 2.22, V3: 4.06, V4: 17.6, V5: 23.3, V6: 7.82, I: 1.19, II: 1.09, III: 0.66, aVL: 0.74, aVF: 0.91 },
+  { age: 0.17, V1: 1.28, V2: 2.27, V3: 4.36, V4: 17.7, V5: 32.8, V6: 12.2, I: 2.38, II: 1.81, III: 0.67, aVL: 1.33, aVF: 1.20 },
+  { age: 0.75, V1: 1.24, V2: 2.37, V3: 4.04, V4: 9.41, V5: 26.4, V6: 12.5, I: 2.22, II: 1.77, III: 0.66, aVL: 1.19, aVF: 1.04 },
+  { age: 2, V1: 1.57, V2: 2.57, V3: 3.59, V4: 6.07, V5: 12.1, V6: 9.67, I: 1.99, II: 1.08, III: 0.63, aVL: 1.03, aVF: 0.81 },
+  { age: 4, V1: 2.04, V2: 2.35, V3: 2.69, V4: 3.54, V5: 4.19, V6: 5.44, I: 1.19, II: 0.85, III: 0.79, aVL: 0.79, aVF: 0.82 },
+  { age: 6.5, V1: 2.37, V2: 2.14, V3: 2.11, V4: 2.69, V5: 3.22, V6: 3.94, I: 0.76, II: 0.75, III: 0.88, aVL: 0.62, aVF: 0.79 },
+  { age: 10, V1: 2.30, V2: 2.05, V3: 1.83, V4: 2.17, V5: 2.65, V6: 3.32, I: 0.61, II: 0.77, III: 1.08, aVL: 0.50, aVF: 0.87 },
+  { age: 14, V1: 2.00, V2: 2.03, V3: 1.55, V4: 1.76, V5: 2.09, V6: 2.42, I: 0.45, II: 0.70, III: 1.18, aVL: 0.46, aVF: 0.82 },
+];
+
+/**
+ * Get lead-specific calibration factors (Rijnbeek 2001)
+ * Returns object with scaling factor for each lead
+ */
+export function getLeadCalibration(ageY) {
+  const factors = CALIBRATION_FACTORS;
+
+  // Find interpolation bounds
+  if (ageY <= factors[0].age) {
+    return { ...factors[0] };
+  }
+  if (ageY >= factors[factors.length - 1].age) {
+    return { ...factors[factors.length - 1] };
+  }
+
+  // Interpolate between age brackets
+  for (let i = 0; i < factors.length - 1; i++) {
+    if (ageY >= factors[i].age && ageY < factors[i + 1].age) {
+      const t = (ageY - factors[i].age) / (factors[i + 1].age - factors[i].age);
+      const result = { age: ageY };
+      for (const lead of ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'I', 'II', 'III', 'aVL', 'aVF']) {
+        result[lead] = lerp(factors[i][lead], factors[i + 1][lead], t);
+      }
+      return result;
+    }
+  }
+
+  return { ...factors[0] };
 }
 
 /**
@@ -289,13 +366,29 @@ function interpAnchors(age, anchors, key) {
   return anchors[0][key];
 }
 
-export function ageDefaults(ageY) {
+export function ageDefaults(ageY, sex = null) {
   ageY = clamp(ageY, 0, 25);
+
+  let QTc = interpAnchors(ageY, AGE_ANCHORS, "QTc");
+  let QRS = interpAnchors(ageY, AGE_ANCHORS, "QRS");
+  let voltageFactor = 1.0;
+
+  // Apply sex-specific adjustments from Rijnbeek et al.
+  if (sex === 'male') {
+    QTc += PEDIATRIC_PRIORS.sex_adjustments.male.QTc_offset;
+    QRS *= PEDIATRIC_PRIORS.sex_adjustments.male.QRS_factor;
+    voltageFactor = PEDIATRIC_PRIORS.sex_adjustments.male.voltage_factor;
+  } else if (sex === 'female') {
+    QTc += PEDIATRIC_PRIORS.sex_adjustments.female.QTc_offset;
+    QRS *= PEDIATRIC_PRIORS.sex_adjustments.female.QRS_factor;
+    voltageFactor = PEDIATRIC_PRIORS.sex_adjustments.female.voltage_factor;
+  }
+
   return {
     HR: interpAnchors(ageY, AGE_ANCHORS, "HR"),
     PR: interpAnchors(ageY, AGE_ANCHORS, "PR"),
-    QRS: interpAnchors(ageY, AGE_ANCHORS, "QRS"),
-    QTc: interpAnchors(ageY, AGE_ANCHORS, "QTc"),
+    QRS,
+    QTc,
     Paxis: interpAnchors(ageY, AGE_ANCHORS, "Paxis"),
     QRSaxis: interpAnchors(ageY, AGE_ANCHORS, "QRSaxis"),
     Taxis: interpAnchors(ageY, AGE_ANCHORS, "Taxis"),
@@ -303,6 +396,7 @@ export function ageDefaults(ageY) {
     juvenileT: interpAnchors(ageY, AGE_ANCHORS, "juvenileT"),
     zQ2: interpAnchors(ageY, AGE_ANCHORS, "zQ2"),
     zT: interpAnchors(ageY, AGE_ANCHORS, "zT"),
+    voltageFactor,
   };
 }
 
@@ -1308,7 +1402,7 @@ function addTWaveTemplate(Vx, Vy, Vz, fs, qrsOn, QT, aScale, dx, age, dT, isPVC,
 // MORPHOLOGY MODEL (Main synthesis function)
 // ============================================================================
 
-export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
+export function morphologyModel(beatSchedule, params, dx, fs, N, seed, ageY = 8) {
   const rng = mulberry32(Math.max(1, Math.floor(seed + 1000)));
   const RR = 60 / params.HR;
   const QT = params.QTc * Math.sqrt(RR);
@@ -1341,7 +1435,6 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
   }
 
   // Respiratory rate varies with age (higher in infants)
-  const ageY = params.ageY || 8;
   const respRate = ageY < 1 ? 40 : ageY < 5 ? 25 : ageY < 12 ? 20 : 15;
   const totalBeats = beatSchedule.beats.length;
 
@@ -1430,6 +1523,9 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
       }
     }
   }
+
+  // Note: Lead-specific amplitude calibration is applied in deviceAndArtifactModel
+  // after VCG-to-lead projection, matching Rijnbeek 2001 reference values
 
   return { Vx, Vy, Vz, QT };
 }
@@ -2142,7 +2238,7 @@ function generateImpedanceDrift(N, fs, rng) {
   return drift;
 }
 
-export function deviceAndArtifactModel(phi, fs, seed, artifactParams = ARTIFACT_PRESETS.typical, deviceParams = DEVICE_PRESETS.diagnostic, enableNoise = true, enableFilters = true) {
+export function deviceAndArtifactModel(phi, fs, seed, artifactParams = ARTIFACT_PRESETS.typical, deviceParams = DEVICE_PRESETS.diagnostic, enableNoise = true, enableFilters = true, ageY = 8) {
   const N = phi.phiRA.length;
   const rng = mulberry32(Math.max(1, Math.floor(seed + 2000)));
 
@@ -2235,6 +2331,32 @@ export function deviceAndArtifactModel(phi, fs, seed, artifactParams = ARTIFACT_
   // Derive leads from modified electrode potentials
   let leads = deriveLeads(phiMod);
 
+  // Apply age-dependent lead-specific amplitude calibration (Rijnbeek 2001)
+  const cal = getLeadCalibration(ageY);
+
+  // Precordial leads: individual calibration per lead
+  for (const name of ['V1', 'V2', 'V3', 'V4', 'V5', 'V6']) {
+    if (leads[name] && cal[name]) {
+      const factor = cal[name];
+      for (let i = 0; i < leads[name].length; i++) {
+        leads[name][i] *= factor;
+      }
+    }
+  }
+
+  // Limb leads I, II, III, aVR, aVL, aVF: use SAME factor to preserve:
+  // - Einthoven's law: I + III = II
+  // - Augmented lead derivations: aVL = I - II/2, aVF = II/2 + III, aVR = -(I+II)/2
+  // Use II calibration as reference (most reliable Rijnbeek data)
+  const limbFactor = cal.II;
+  for (const name of ['I', 'II', 'III', 'aVR', 'aVL', 'aVF']) {
+    if (leads[name]) {
+      for (let i = 0; i < leads[name].length; i++) {
+        leads[name][i] *= limbFactor;
+      }
+    }
+  }
+
   // Apply device filtering and processing
   if (enableFilters) {
     const leadNames = Object.keys(leads);
@@ -2277,14 +2399,15 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     artifactParams = ARTIFACT_PRESETS.typical,
     deviceParams = DEVICE_PRESETS.diagnostic,
     electrodeGeometry = DEFAULT_ELECTRODE_GEOMETRY,
+    sex = null,  // 'male', 'female', or null (unspecified)
   } = options;
 
   const fs = 1000;
   const duration = 10.0;
   const N = Math.floor(duration * fs);
 
-  // Get parameters
-  const base = ageDefaults(ageY);
+  // Get parameters with sex-specific adjustments
+  const base = ageDefaults(ageY, sex);
   const params = applyDx(base, dx);
   const RR = 60 / params.HR;
   const QT = params.QTc * Math.sqrt(RR);
@@ -2293,12 +2416,12 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
   const beatSchedule = rhythmModel(params, dx, duration, seed, ageY);
 
   // Module 2: Morphology
-  const vcg = morphologyModel(beatSchedule, params, dx, fs, N, seed);
+  const vcg = morphologyModel(beatSchedule, params, dx, fs, N, seed, ageY);
 
   // Module 3: Lead Field (with age-dependent heart orientation)
   const electrodePotentials = leadFieldModel(vcg, electrodeGeometry, { ageY, seed });
 
-  // Module 5: Device and Artifact (includes deriving leads)
+  // Module 5: Device and Artifact (includes deriving leads + amplitude calibration)
   const deviceResult = deviceAndArtifactModel(
     electrodePotentials,
     fs,
@@ -2306,7 +2429,8 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     enableNoise ? artifactParams : ARTIFACT_PRESETS.none,
     deviceParams,
     enableNoise,
-    enableFilters
+    enableFilters,
+    ageY
   );
 
   // Handle both old format (just leads) and new format ({leads, fs})
@@ -2326,9 +2450,17 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     return out;
   }
 
+  // Apply sex-specific voltage scaling (males have ~10% higher voltages)
+  const voltageFactor = params.voltageFactor || 1.0;
+
   const leads_uV = {};
   for (const name of Object.keys(leads)) {
-    leads_uV[name] = toUV(leads[name]);
+    // Apply voltage factor before conversion
+    const scaled = new Float64Array(leads[name].length);
+    for (let i = 0; i < leads[name].length; i++) {
+      scaled[i] = leads[name][i] * voltageFactor;
+    }
+    leads_uV[name] = toUV(scaled);
   }
 
   return {
@@ -2337,8 +2469,9 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     duration_s: duration,
     targets: {
       synthetic: true,
-      generator_version: "2.2.0-device",
+      generator_version: "2.3.0-calibrated",
       age_years: ageY,
+      sex: sex || "unspecified",
       dx,
       HR_bpm: params.HR,
       PR_ms: Math.round(params.PR * 1000),
