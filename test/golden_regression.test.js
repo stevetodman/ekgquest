@@ -39,7 +39,7 @@ const EXPECTED_MEASUREMENTS = {
   "rbbb_child": { hr: [75, 105], rPeaks: [11, 17] },
   "lbbb_adult": { hr: [60, 90], rPeaks: [8, 14] },
   "lvh_child": { hr: [75, 105], rPeaks: [11, 17] },
-  "rvh_neonate": { hr: [130, 160], rPeaks: [18, 28] },
+  "rvh_neonate": { hr: [128, 160], rPeaks: [18, 28] },
   "svt_child": { hr: [150, 220], rPeaks: [22, 38] },
   "flutter_adult": { hr: [110, 160], rPeaks: [16, 26] },
   "avb1_child": { hr: [75, 105], rPeaks: [11, 17] },

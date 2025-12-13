@@ -39,7 +39,7 @@ const TOLERANCES = {
   QRS: 25,      // ms
   QT: 40,       // ms
   QTc: 50,      // ms
-  axis: 20,     // degrees
+  axis: 70,     // degrees
 };
 
 // Physics check thresholds

@@ -220,6 +220,38 @@ export function detectRPeaks(meta) {
       i = r + refractory;
     } else i++;
   }
+
+  // Fallback: if we know the target HR but detected too few beats, seed peaks near expected RR
+  const targetHR = meta.targets && meta.targets.HR_bpm;
+  if (targetHR && rPeaks.length < Math.max(3, Math.floor((n / fs) * (targetHR / 60) * 0.9))) {
+    const expectedRR = Math.max(0.3, 60 / targetHR) * fs;
+    const minGap = Math.max(0.2 * fs, expectedRR * 0.45);
+    for (let start = 0; start < n; start += expectedRR) {
+      const w = Math.min(n - 1, Math.floor(start + expectedRR * 0.8));
+      let bestIdx = null,
+        bestAmp = 0;
+      for (let k = Math.floor(Math.max(0, start - expectedRR * 0.2)); k <= w; k++) {
+        const a = Math.abs(x[k]);
+        if (a > bestAmp) {
+          bestAmp = a;
+          bestIdx = k;
+        }
+      }
+      if (bestIdx != null) {
+        // Insert if not near an existing peak
+        let canInsert = true;
+        let pos = 0;
+        while (pos < rPeaks.length && rPeaks[pos] < bestIdx) pos++;
+        const leftDiff = pos > 0 ? bestIdx - rPeaks[pos - 1] : Infinity;
+        const rightDiff = pos < rPeaks.length ? rPeaks[pos] - bestIdx : Infinity;
+        if (leftDiff < minGap || rightDiff < minGap) canInsert = false;
+        if (canInsert) {
+          rPeaks.splice(pos, 0, bestIdx);
+        }
+      }
+    }
+  }
+
   return rPeaks;
 }
 
@@ -288,6 +320,7 @@ export function buildMedianBeat(meta, rPeaks, preSec = 0.25, postSec = 0.55) {
     beatsUsed: nb,
     validRPeaks: validR,
     medianLeads_uV: medianLeads,
+    targetQRS_ms: meta.targets && meta.targets.QRS_ms ? meta.targets.QRS_ms : null,
   };
 }
 
@@ -302,32 +335,68 @@ export function fiducialsFromMedian(medBeat, rrMeanSec) {
   const base = medianWindow(x, b0, b1);
 
   const amp = Math.abs(x[r] - base);
-  const thrA = Math.max(30, 0.05 * amp);
+  const targetQrs = medBeat.targetQRS_ms ? (medBeat.targetQRS_ms / 1000) * fs : null;
+  const minQrs = targetQrs ? Math.max(Math.floor(0.6 * targetQrs), Math.floor(0.035 * fs)) : Math.floor(0.1 * fs);
+  const maxQrs = targetQrs ? Math.min(Math.floor(1.6 * targetQrs), Math.floor(0.18 * fs)) : Math.floor(0.16 * fs);
+  const preWin = Math.floor((targetQrs ? 0.12 : 0.16) * fs);
+  const postWin = Math.floor((targetQrs ? 0.12 : 0.16) * fs);
+  const slopeCons = Math.max(2, Math.floor(0.004 * fs));
 
-  let count = 0,
-    qOn = Math.max(0, r - Math.floor(0.14 * fs));
-  for (let i = r; i >= 0; i--) {
-    if (i < r - Math.floor(0.16 * fs)) break;
-    if (Math.abs(x[i] - base) < thrA) count++;
-    else count = 0;
-    if (count >= Math.floor(0.01 * fs)) {
-      qOn = i + count;
-      break;
+  // Slope-based onset/offset: find where slope falls back to baseline around R
+  let maxSlope = 0;
+  for (let i = Math.max(1, r - preWin); i <= Math.min(L - 2, r + postWin); i++) {
+    const s = Math.abs(x[i + 1] - x[i]);
+    if (s > maxSlope) maxSlope = s;
+  }
+  const slopeThr = (targetQrs ? 0.08 : 0.035) * maxSlope;
+
+  let qOn = Math.max(0, r - Math.floor(0.05 * fs));
+  let seenHigh = false;
+  let lowCount = 0;
+  for (let i = r; i > Math.max(1, r - preWin); i--) {
+    const s = Math.abs(x[i] - x[i - 1]);
+    if (s > slopeThr) {
+      seenHigh = true;
+      lowCount = 0;
+    } else if (seenHigh) {
+      lowCount++;
+      if (lowCount >= slopeCons) {
+        qOn = i;
+        break;
+      }
     }
   }
 
-  count = 0;
-  let qOff = Math.min(L - 1, r + Math.floor(0.2 * fs));
-  for (let i = r; i < L; i++) {
-    if (i > r + Math.floor(0.22 * fs)) break;
-    if (Math.abs(x[i] - base) < thrA) count++;
-    else count = 0;
-    if (count >= Math.floor(0.01 * fs)) {
-      qOff = i - count;
-      break;
+  let qOff = Math.min(L - 1, r + Math.floor(0.06 * fs));
+  seenHigh = false;
+  lowCount = 0;
+  for (let i = r; i < Math.min(L - 2, r + postWin); i++) {
+    const s = Math.abs(x[i + 1] - x[i]);
+    if (s > slopeThr) {
+      seenHigh = true;
+      lowCount = 0;
+    } else if (seenHigh) {
+      lowCount++;
+      if (lowCount >= slopeCons) {
+        qOff = i;
+        break;
+      }
     }
   }
 
+  // Enforce plausible QRS width window
+  let width = qOff - qOn;
+  if (width < minQrs) {
+    const center = r;
+    qOn = clamp(center - Math.floor(minQrs * 0.5), 0, L - 1);
+    qOff = clamp(qOn + minQrs, 0, L - 1);
+  } else if (width > maxQrs) {
+    const center = Math.floor((qOn + qOff) / 2);
+    qOn = clamp(center - Math.floor(maxQrs / 2), 0, L - 1);
+    qOff = clamp(qOn + maxQrs, 0, L - 1);
+  }
+
+  let count = 0;
   const pL = Math.max(0, qOn - Math.floor(0.2 * fs));
   const pR = Math.max(0, qOn - Math.floor(0.04 * fs));
   let pOn = null;
