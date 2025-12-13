@@ -659,6 +659,9 @@
     <div class="divider"></div>
     <div class="upload-section">
       <strong style="font-size:12px;color:var(--muted)">Import Real ECG</strong>
+      <button id="clipboardBtn" onclick="loadFromClipboard()" title="Copy any ECG image, then click this">
+        📋 Paste from Clipboard
+      </button>
       <label>Upload PDF or Image
         <input type="file" id="imageInput" accept=".pdf,.png,.jpg,.jpeg,.webp">
       </label>
@@ -1249,6 +1252,113 @@ window.clearUploadedImage = function() {
   redraw();
   showStatus('Image cleared', 'info', 2000);
 };
+
+// Load ECG from clipboard (direct paste or clipboard watcher)
+window.loadFromClipboard = async function() {
+  try {
+    // First try native Clipboard API (modern browsers)
+    if (navigator.clipboard && navigator.clipboard.read) {
+      showStatus('Reading clipboard...', 'info', 0);
+      const items = await navigator.clipboard.read();
+
+      for (const item of items) {
+        // Check for image
+        const imageTypes = item.types.filter(t => t.startsWith('image/'));
+        if (imageTypes.length > 0) {
+          const blob = await item.getType(imageTypes[0]);
+          const img = new Image();
+          img.onload = function() {
+            uploadedImage = img;
+            uploadedImageName = 'clipboard-paste.png';
+            imageMode = true;
+            imageCalibration = null;
+
+            // Try auto-calibration
+            const detected = detectGridSpacing(img);
+            if (detected && detected.confidence > 0.6) {
+              imageCalibration = {
+                pxPerMm: detected.pxPerMm / (img.width / uploadedImage.width),
+                method: 'auto-clipboard'
+              };
+              showStatus('Pasted from clipboard with auto-calibration', 'success');
+            } else {
+              showStatus('Pasted from clipboard - click Calibrate for accurate measurements', 'info');
+            }
+
+            document.getElementById('calibrationControls').style.display = 'block';
+            document.getElementById('caseInfo').textContent = 'Clipboard paste';
+            redraw();
+          };
+          img.src = URL.createObjectURL(blob);
+          return;
+        }
+      }
+      showStatus('No image found in clipboard. Copy an ECG image first (Cmd+C)', 'warning');
+    }
+
+    // Fallback: try clipboard watcher API
+    try {
+      const response = await fetch('http://localhost:8001/latest-ecg');
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.leads_uV) {
+          ecgData = data;
+          imageMode = false;
+          uploadedImage = null;
+          document.getElementById('calibrationControls').style.display = 'none';
+          updateAfterLoad();
+          showStatus('Loaded from Clipboard Watcher', 'success');
+          return;
+        }
+      }
+    } catch (e) {
+      // Clipboard watcher not running, that's fine
+    }
+
+    showStatus('Copy an ECG image first (Cmd+C), then click this button', 'info');
+
+  } catch (err) {
+    console.error('Clipboard error:', err);
+    showStatus('Clipboard access denied. Try: drag image directly onto canvas', 'warning');
+  }
+};
+
+// Also support Cmd+V anywhere to paste
+document.addEventListener('paste', async (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      const img = new Image();
+      img.onload = function() {
+        uploadedImage = img;
+        uploadedImageName = 'pasted-image.png';
+        imageMode = true;
+        imageCalibration = null;
+
+        const detected = detectGridSpacing(img);
+        if (detected && detected.confidence > 0.6) {
+          imageCalibration = {
+            pxPerMm: detected.pxPerMm,
+            method: 'auto-paste'
+          };
+          showStatus('ECG pasted with auto-calibration!', 'success');
+        } else {
+          showStatus('ECG pasted - click Calibrate for measurements', 'info');
+        }
+
+        document.getElementById('calibrationControls').style.display = 'block';
+        document.getElementById('caseInfo').textContent = 'Pasted image';
+        redraw();
+      };
+      img.src = URL.createObjectURL(blob);
+      return;
+    }
+  }
+});
 
 window.startCalibration = function() {
   if (!imageMode || !uploadedImage) {
