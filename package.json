@@ -12,7 +12,8 @@
     "format:check": "prettier --check \"**/*.{js,mjs,json,md,html,css}\"",
     "start": "node dev-server.mjs",
     "test:visual": "node tools/visual-regression.mjs --check",
-    "test:visual:update": "node tools/visual-regression.mjs --update"
+    "test:visual:update": "node tools/visual-regression.mjs --update",
+    "import": "bash tools/start-import-mode.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
