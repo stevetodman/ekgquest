@@ -411,6 +411,42 @@
     cursor: grabbing;
   }
 
+  /* Caliper floating status */
+  .caliper-status {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 24px;
+    font-size: 13px;
+    font-weight: 500;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    animation: slideUp 0.2s ease-out;
+  }
+  .caliper-status.active { display: flex; }
+  .caliper-status .dot {
+    width: 8px;
+    height: 8px;
+    background: #4caf50;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
   /* Focus styles for accessibility */
   button:focus-visible, select:focus-visible, input:focus-visible, .tab:focus-visible {
     outline: 2px solid var(--accent);
@@ -468,10 +504,53 @@
     canvas { height: auto; }
   }
 
+  /* Mobile - Tablet */
   @media (max-width: 768px) {
-    .measurements-grid { grid-template-columns: repeat(2, 1fr); }
-    canvas { height: 600px; }
+    body { padding: 8px; }
+    .header h1 { font-size: 1.3rem; }
+    .tabs { flex-wrap: wrap; gap: 4px; }
+    .tab-btn { padding: 8px 12px; font-size: 0.85rem; }
+    .tab-panel { padding: 12px; }
+    .tab-panel label { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .tab-panel input, .tab-panel select { width: 100%; max-width: none; }
+    .measurements-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    canvas { height: 500px; min-height: 400px; }
     .mode-btn { padding: 8px 16px; font-size: 13px; }
+    .canvas-wrap { border-radius: 8px; }
+    .reveal-btn { padding: 10px 20px; font-size: 0.9rem; }
+  }
+
+  /* Mobile - Phone */
+  @media (max-width: 480px) {
+    body { padding: 4px; }
+    .header { padding: 12px; margin-bottom: 12px; }
+    .header h1 { font-size: 1.1rem; }
+    .mode-toggle { margin-bottom: 8px; }
+    .mode-btn { padding: 6px 12px; font-size: 12px; }
+    .tabs { gap: 2px; padding: 0 8px; }
+    .tab-btn { padding: 6px 10px; font-size: 0.8rem; flex: 1; text-align: center; }
+    .tab-panel { padding: 8px; }
+    .tab-panel label { font-size: 0.85rem; margin-bottom: 8px; }
+    .measurements-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+    .measurements-grid > div { padding: 6px 8px; font-size: 0.8rem; }
+    canvas { height: 400px; min-height: 300px; }
+    .reveal-btn { padding: 8px 16px; font-size: 0.85rem; width: 100%; }
+    .footer { padding: 12px; font-size: 0.75rem; }
+    .caliper-status { font-size: 0.8rem; padding: 6px 10px; }
+  }
+
+  /* Touch-friendly controls */
+  @media (hover: none) and (pointer: coarse) {
+    .tab-btn, .mode-btn, button, select, input {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    .tab-panel label {
+      padding: 4px 0;
+    }
+    .reveal-btn {
+      min-height: 48px;
+    }
   }
 </style>
 </head>
@@ -505,6 +584,7 @@
   <button class="tab active" onclick="showTab('case')">Case</button>
   <button class="tab" onclick="showTab('view')">View</button>
   <button class="tab" onclick="showTab('tools')">Tools</button>
+  <button class="tab" onclick="showTab('compare')">Compare</button>
   <button class="tab" onclick="showTab('export')">Export</button>
 </div>
 
@@ -548,10 +628,18 @@
         <optgroup label="Tachyarrhythmias">
           <option>SVT (narrow)</option>
           <option>Atrial flutter (2:1)</option>
+          <option>Atrial fibrillation</option>
+        </optgroup>
+        <optgroup label="Ischemia">
+          <option>STEMI (anterior)</option>
         </optgroup>
         <optgroup label="Repolarization">
           <option>Long QT</option>
           <option>Pericarditis</option>
+          <option>Brugada (Type 1)</option>
+        </optgroup>
+        <optgroup label="Metabolic">
+          <option>Hyperkalemia</option>
         </optgroup>
         <optgroup label="Ectopy">
           <option>PACs</option>
@@ -565,9 +653,35 @@
     <button class="primary" id="genBtn" onclick="generate()">Generate</button>
     <button id="randBtn" onclick="randomize()">Random</button>
     <div class="divider"></div>
-    <label>Load file
-      <input type="file" id="fileInput" accept=".json">
+    <label>Load JSON/CSV
+      <input type="file" id="fileInput" accept=".json,.csv">
     </label>
+    <div class="divider"></div>
+    <div class="upload-section">
+      <strong style="font-size:12px;color:var(--muted)">Import Real ECG</strong>
+      <label>Upload PDF or Image
+        <input type="file" id="imageInput" accept=".pdf,.png,.jpg,.jpeg,.webp">
+      </label>
+      <div id="calibrationControls" style="display:none">
+        <label>Paper speed
+          <select id="importSpeed" onchange="redraw()">
+            <option value="25" selected>25 mm/s</option>
+            <option value="50">50 mm/s</option>
+          </select>
+        </label>
+        <label>Gain
+          <select id="importGain" onchange="redraw()">
+            <option value="10" selected>10 mm/mV</option>
+            <option value="5">5 mm/mV</option>
+            <option value="20">20 mm/mV</option>
+          </select>
+        </label>
+        <button id="calibrateBtn" onclick="startCalibration()">Calibrate Grid</button>
+        <button id="digitizeBtn" onclick="digitizeECG()" class="primary">Digitize Trace</button>
+        <button onclick="clearUploadedImage()">Clear</button>
+        <div id="calibrationStatus" class="hint" style="display:none"></div>
+      </div>
+    </div>
   </div>
 
   <!-- View Panel -->
@@ -618,12 +732,32 @@
     <label><input id="snapGrid" type="checkbox"> Snap to grid</label>
     <button onclick="clearAllCalipers()">Clear All</button>
     <div class="divider"></div>
+    <div class="caliper-instructions">
+      <strong>How to measure:</strong>
+      <ol style="margin:4px 0 0 16px;padding:0;font-size:12px;color:var(--muted)">
+        <li>Click and drag across the waveform</li>
+        <li>Release to create measurement</li>
+        <li>Click measurement to select, drag handles to adjust</li>
+      </ol>
+    </div>
+    <div class="divider"></div>
     <span class="hint">
       <span class="kbd">C</span> Toggle &nbsp;
-      <span class="kbd">Shift</span> Constrain H/V &nbsp;
-      <span class="kbd">Del</span> Remove selected &nbsp;
+      <span class="kbd">Shift</span> Lock H/V &nbsp;
+      <span class="kbd">Del</span> Delete &nbsp;
       <span class="kbd">Esc</span> Cancel
     </span>
+  </div>
+
+  <!-- Compare Panel -->
+  <div class="tab-panel" id="panel-compare">
+    <button id="storeRefBtn" class="primary" onclick="storeReference()">Store as Reference</button>
+    <button id="clearRefBtn" onclick="clearReference()" disabled>Clear Reference</button>
+    <div class="divider"></div>
+    <label><input id="showOverlay" type="checkbox" onchange="redraw()" disabled> Show overlay</label>
+    <label><input id="showDiff" type="checkbox" onchange="redraw()"> Highlight differences</label>
+    <div class="divider"></div>
+    <div id="refInfo" class="hint">No reference stored</div>
   </div>
 
   <!-- Export Panel -->
@@ -667,6 +801,12 @@
   </div>
 </div>
 
+<!-- Caliper Status Indicator -->
+<div class="caliper-status" id="caliperStatus">
+  <span class="dot"></span>
+  <span>Caliper Mode: Click and drag to measure</span>
+</div>
+
 <!-- Footer -->
 <div class="footer">
   EKGQuest Lab — Educational ECG synthesis and teaching tool.
@@ -704,6 +844,20 @@ let selectedCaliperId = null;  // Currently selected measurement for editing
 let draggingHandle = null;     // { measurementId, handle: 'p1' | 'p2' }
 let shiftHeld = false;
 let lastMousePos = null;
+
+// Comparison mode state
+let referenceECG = null;       // Stored reference ECG for comparison
+let referenceMeta = null;      // Metadata about the reference (age, dx, etc.)
+
+// Uploaded image state
+let uploadedImage = null;      // HTMLImageElement of uploaded ECG
+let uploadedImageName = null;  // Original filename
+let imageMode = false;         // Are we displaying an uploaded image?
+let imageCalibration = null;   // { pxPerMm, offsetX, offsetY, drawW, drawH } - actual calibration from image
+
+// Calibration mode state
+let calibrationMode = false;   // Are we in calibration mode?
+let calibrationPoint1 = null;  // First calibration point
 
 const CALIPER_COLORS = ['#1b6dff', '#e91e63', '#4caf50', '#ff9800', '#9c27b0', '#00bcd4'];
 let nextCaliperColor = 0;
@@ -773,8 +927,9 @@ window.reveal = function() {
 // ============================================================================
 
 window.showTab = function(tabId) {
+  const tabIds = ['case', 'view', 'tools', 'compare', 'export'];
   document.querySelectorAll('.tab').forEach((t, i) => {
-    t.className = ['case', 'view', 'tools', 'export'][i] === tabId ? 'tab active' : 'tab';
+    t.className = tabIds[i] === tabId ? 'tab active' : 'tab';
   });
   document.querySelectorAll('.tab-panel').forEach(p => p.className = 'tab-panel');
   document.getElementById('panel-' + tabId).className = 'tab-panel active';
@@ -798,6 +953,50 @@ window.toggleAdvanced = function() {
 };
 
 // ============================================================================
+// COMPARISON MODE
+// ============================================================================
+
+window.storeReference = function() {
+  if (!ecgData) {
+    showStatus('No ECG loaded to store as reference', 'warning');
+    return;
+  }
+
+  // Deep copy the current ECG data
+  referenceECG = JSON.parse(JSON.stringify(ecgData));
+
+  // Store metadata for display
+  const age = document.getElementById('ageYears').value;
+  const dx = document.getElementById('dx').value;
+  const seed = document.getElementById('seed').value;
+  referenceMeta = { age, dx, seed };
+
+  // Update UI
+  document.getElementById('clearRefBtn').disabled = false;
+  document.getElementById('showOverlay').disabled = false;
+  document.getElementById('showOverlay').checked = true;
+  document.getElementById('refInfo').innerHTML =
+    `<strong>Reference:</strong> ${dx}<br>Age: ${age}y, Seed: ${seed}`;
+
+  showStatus('Reference ECG stored', 'success', 2000);
+  redraw();
+};
+
+window.clearReference = function() {
+  referenceECG = null;
+  referenceMeta = null;
+
+  // Update UI
+  document.getElementById('clearRefBtn').disabled = true;
+  document.getElementById('showOverlay').disabled = true;
+  document.getElementById('showOverlay').checked = false;
+  document.getElementById('refInfo').textContent = 'No reference stored';
+
+  showStatus('Reference cleared', 'info', 2000);
+  redraw();
+};
+
+// ============================================================================
 // SYNTHESIS
 // ============================================================================
 
@@ -818,40 +1017,14 @@ window.generate = async function() {
   const noiseEnabled = document.getElementById('noise').checked;
   const filtersEnabled = document.getElementById('filters').checked;
 
-  // Generate ECG using modular synthesis
-  const fs = 1000;
-  const duration = 10;
-  const N = fs * duration;
-
-  const params = synth.applyDx(synth.ageDefaults(age, sex), dx);
-  const beatSchedule = synth.rhythmModel(params, dx, fs, duration, seed);
-  const { Vx, Vy, Vz } = synth.morphologyModel(beatSchedule, params, dx, fs, N, seed);
-  const leads = synth.leadFieldModel(Vx, Vy, Vz, fs, seed, params);
-
-  // Apply device model
-  let processedLeads = leads;
-  if (noiseEnabled || filtersEnabled) {
-    processedLeads = synth.deviceModel(leads, fs, noiseEnabled, filtersEnabled, seed);
-  }
-
-  // Create ECG data object
-  ecgData = {
-    fs,
-    duration_s: duration,
-    leads_uV: processedLeads,
-    targets: {
-      synthetic: true,
-      generator_version: "2.0-lab",
-      age_years: age,
-      sex: sex,
-      dx: dx,
-      HR_bpm: params.HR,
-      PR_ms: Math.round(params.PR * 1000),
-      QRS_ms: Math.round(params.QRS * 1000),
-      QTc_ms: Math.round(params.QTc * 1000),
-      seed: seed
-    }
-  };
+  // Use the unified synthesizer which handles all the complexity
+  ecgData = synth.synthECGModular(age, dx, seed, {
+    sex: sex || null,
+    enableNoise: noiseEnabled,
+    enableFilters: filtersEnabled,
+    artifactParams: noiseEnabled ? synth.ARTIFACT_PRESETS.typical : synth.ARTIFACT_PRESETS.none,
+    deviceParams: filtersEnabled ? synth.DEVICE_PRESETS.diagnostic : synth.DEVICE_PRESETS.raw
+  });
 
   updateAfterLoad();
   showStatus('ECG generated', 'success', 2000);
@@ -872,13 +1045,958 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
 
   try {
     const text = await file.text();
-    ecgData = JSON.parse(text);
-    updateAfterLoad();
-    showStatus('File loaded successfully', 'success');
+
+    // Check if this is a CSV file (from WebPlotDigitizer or similar)
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      const csvData = parseCSVtoECG(text, file.name);
+      if (csvData) {
+        ecgData = csvData;
+        imageMode = false;
+        uploadedImage = null;
+        document.getElementById('calibrationControls').style.display = 'none';
+        updateAfterLoad();
+        const leadCount = Object.keys(csvData.leads_uV).length;
+        showStatus(`CSV imported: ${leadCount} lead(s) digitized`, 'success');
+        return;
+      } else {
+        showStatus('Could not parse CSV. See console for format help.', 'error');
+        console.log(`
+CSV Import Format Help:
+-----------------------
+WebPlotDigitizer format (time, voltage):
+  X,Y
+  0,0.1
+  0.004,0.15
+  ...
+
+Multi-lead format (time, lead1, lead2, ...):
+  time,I,II,III,V1,V2,V3,V4,V5,V6
+  0,0.1,0.2,0.1,0.05,...
+  0.002,0.12,0.22,...
+
+Units: Time in seconds, Voltage in mV
+        `);
+        return;
+      }
+    }
+
+    const data = JSON.parse(text);
+
+    // Check if this is a teaching case (uploaded image with measurements)
+    if (data.type === 'teaching_case' && data.source?.imageData) {
+      // Load the embedded image
+      const img = new Image();
+      img.src = data.source.imageData;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Failed to load embedded image'));
+      });
+
+      uploadedImage = img;
+      uploadedImageName = data.source.filename || 'teaching-case.png';
+      imageMode = true;
+      ecgData = null;
+
+      // Restore calibration settings
+      if (data.calibration) {
+        document.getElementById('importSpeed').value = data.calibration.paperSpeed_mm_s || 25;
+        document.getElementById('importGain').value = data.calibration.gain_mm_mV || 10;
+        if (data.calibration.scale_pxmm) {
+          document.getElementById('pxmm').value = data.calibration.scale_pxmm;
+        }
+      }
+
+      // Restore caliper measurements
+      if (data.measurements) {
+        caliperMeasurements = data.measurements.map(m => ({
+          id: m.id || 'cal_' + Date.now() + Math.random(),
+          p1: m.p1,
+          p2: m.p2,
+          color: m.color || CALIPER_COLORS[0]
+        }));
+        updateCaliperList();
+      }
+
+      document.getElementById('calibrationControls').style.display = 'flex';
+      document.getElementById('caseInfo').textContent = `Teaching case: ${uploadedImageName}`;
+      document.getElementById('measurements').classList.add('hidden');
+
+      showStatus(`Teaching case loaded with ${caliperMeasurements.length} measurements`, 'success');
+      redraw();
+    } else {
+      // Regular ECG JSON
+      ecgData = data;
+      imageMode = false;
+      uploadedImage = null;
+      document.getElementById('calibrationControls').style.display = 'none';
+      updateAfterLoad();
+      showStatus('File loaded successfully', 'success');
+    }
   } catch (err) {
     showStatus('Failed to load file: ' + err.message, 'error', 6000);
   }
 });
+
+// Image/PDF upload handler
+document.getElementById('imageInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    showStatus('Loading image...', 'info', 0);
+
+    if (file.type === 'application/pdf') {
+      // Load PDF.js dynamically
+      if (!window.pdfjsLib) {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        document.head.appendChild(script);
+        await new Promise((resolve, reject) => {
+          script.onload = resolve;
+          script.onerror = () => reject(new Error('Failed to load PDF.js'));
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+
+      // Load and render PDF
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const page = await pdf.getPage(1);
+
+      // Render at high resolution for quality
+      const scale = 2.0;
+      const viewport = page.getViewport({ scale });
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = viewport.width;
+      tempCanvas.height = viewport.height;
+      const tempCtx = tempCanvas.getContext('2d');
+
+      await page.render({ canvasContext: tempCtx, viewport }).promise;
+
+      // Convert to image
+      const img = new Image();
+      img.src = tempCanvas.toDataURL('image/png');
+      await new Promise(resolve => img.onload = resolve);
+
+      uploadedImage = img;
+    } else {
+      // Load regular image
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Failed to load image'));
+      });
+      uploadedImage = img;
+    }
+
+    uploadedImageName = file.name;
+    imageMode = true;
+    ecgData = null;  // Clear synthetic data
+    measurements = null;
+
+    // Show calibration controls
+    document.getElementById('calibrationControls').style.display = 'flex';
+
+    // Update case info
+    document.getElementById('caseInfo').textContent = `Imported: ${file.name}`;
+    document.getElementById('measurements').classList.add('hidden');
+
+    // Attempt auto-calibration
+    const detected = detectGridSpacing(uploadedImage);
+    const statusEl = document.getElementById('calibrationStatus');
+
+    if (detected && detected.confidence > 0.6) {
+      imageCalibration = {
+        pxPerMm: detected.pxPerMm,
+        calibrated: true,
+        method: 'auto'
+      };
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = `<strong>Auto-calibrated:</strong> ${detected.pxPerMm.toFixed(1)} px/mm`;
+      statusEl.style.color = '#2e7d32';
+      document.getElementById('calibrateBtn').textContent = 'Recalibrate';
+      showStatus('Image loaded & auto-calibrated — ready to measure!', 'success');
+    } else {
+      imageCalibration = null;
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = 'Click <strong>Calibrate Grid</strong> for accurate measurements';
+      statusEl.style.color = '#ff9800';
+      showStatus('Image loaded — calibrate for accurate measurements', 'info');
+    }
+
+    redraw();
+
+  } catch (err) {
+    showStatus('Failed to load image: ' + err.message, 'error', 6000);
+    console.error(err);
+  }
+});
+
+window.clearUploadedImage = function() {
+  uploadedImage = null;
+  uploadedImageName = null;
+  imageMode = false;
+  imageCalibration = null;
+  calibrationMode = false;
+  calibrationPoint1 = null;
+  document.getElementById('calibrationControls').style.display = 'none';
+  document.getElementById('imageInput').value = '';
+  document.getElementById('caseInfo').textContent = 'No case loaded';
+  clearAllCalipers();
+  redraw();
+  showStatus('Image cleared', 'info', 2000);
+};
+
+window.startCalibration = function() {
+  if (!imageMode || !uploadedImage) {
+    showStatus('Upload an image first', 'warning');
+    return;
+  }
+
+  // First try auto-detection
+  showStatus('Detecting grid automatically...', 'info', 0);
+
+  const detected = detectGridSpacing(uploadedImage);
+
+  if (detected && detected.confidence > 0.7) {
+    // Auto-calibration succeeded
+    imageCalibration = {
+      pxPerMm: detected.pxPerMm,
+      calibrated: true,
+      method: 'auto'
+    };
+
+    const statusEl = document.getElementById('calibrationStatus');
+    statusEl.style.display = 'block';
+    statusEl.innerHTML = `<strong>Auto-calibrated:</strong> ${detected.pxPerMm.toFixed(2)} px/mm (confidence: ${(detected.confidence * 100).toFixed(0)}%)`;
+    statusEl.style.color = '#2e7d32';
+
+    document.getElementById('calibrateBtn').textContent = 'Manual Calibrate';
+    showStatus(`Auto-calibration complete: ${detected.pxPerMm.toFixed(2)} px/mm`, 'success');
+    updateCaliperList();
+    redraw();
+    return;
+  }
+
+  // Fall back to manual calibration
+  calibrationMode = true;
+  calibrationPoint1 = null;
+  calipersActive = false;
+
+  const statusEl = document.getElementById('calibrationStatus');
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '<strong>Step 1:</strong> Click the LEFT edge of 5 big grid boxes (25mm)';
+  statusEl.style.color = '#1b6dff';
+
+  document.getElementById('calibrateBtn').textContent = 'Cancel Calibration';
+  document.getElementById('calibrateBtn').onclick = cancelCalibration;
+  document.getElementById('c').style.cursor = 'crosshair';
+
+  showStatus('Auto-detection failed. Click two points exactly 5 big boxes apart.', 'info', 0);
+  redraw();
+};
+
+// Parse CSV from WebPlotDigitizer or similar tools
+function parseCSVtoECG(csvText, filename) {
+  try {
+    const lines = csvText.trim().split(/\r?\n/);
+    if (lines.length < 10) {
+      showStatus('CSV file too short - need at least 10 data points', 'error');
+      return null;
+    }
+
+    // Detect delimiter (comma or tab)
+    const delimiter = lines[0].includes('\t') ? '\t' : ',';
+
+    // Parse header row to detect columns
+    const headerRow = lines[0].split(delimiter).map(s => s.trim().toLowerCase());
+
+    // Check if first row is a header or data
+    const firstRowIsHeader = headerRow.some(h =>
+      /^(time|t|x|seconds?|ms|lead|i|ii|iii|avr|avl|avf|v[1-6])$/i.test(h)
+    );
+
+    const dataStartRow = firstRowIsHeader ? 1 : 0;
+
+    // Parse all data rows
+    const rows = [];
+    for (let i = dataStartRow; i < lines.length; i++) {
+      const values = lines[i].split(delimiter).map(s => parseFloat(s.trim()));
+      if (values.length >= 2 && values.every(v => !isNaN(v))) {
+        rows.push(values);
+      }
+    }
+
+    if (rows.length < 10) {
+      showStatus('CSV has too few valid data rows', 'error');
+      return null;
+    }
+
+    // Determine format based on header or column count
+    const numCols = rows[0].length;
+
+    // Standard lead names for multi-column format
+    const LEAD_NAMES = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+
+    let leads_uV = {};
+    let fs = 500; // Target sample rate
+    let duration_s;
+
+    if (numCols === 2) {
+      // WebPlotDigitizer format: time, voltage (single lead)
+      // Time is typically in seconds, voltage in mV
+      const times = rows.map(r => r[0]);
+      const voltages = rows.map(r => r[1]);
+
+      // Detect time units (seconds vs milliseconds)
+      const timeRange = Math.max(...times) - Math.min(...times);
+      const timeScale = timeRange > 100 ? 0.001 : 1; // If range > 100, assume ms
+
+      // Normalize time to start at 0
+      const minTime = Math.min(...times);
+      const normalizedTimes = times.map(t => (t - minTime) * timeScale);
+      duration_s = Math.max(...normalizedTimes);
+
+      // Detect voltage units (mV vs µV)
+      const maxV = Math.max(...voltages.map(Math.abs));
+      const voltageScale = maxV > 100 ? 1 : 1000; // If max > 100, assume already µV
+
+      // Resample to uniform 500 Hz
+      const numSamples = Math.round(duration_s * fs);
+      const resampledVoltages = new Float32Array(numSamples);
+
+      for (let i = 0; i < numSamples; i++) {
+        const t = i / fs;
+        // Find surrounding points for linear interpolation
+        let j = 0;
+        while (j < normalizedTimes.length - 1 && normalizedTimes[j + 1] < t) j++;
+
+        if (j >= normalizedTimes.length - 1) {
+          resampledVoltages[i] = voltages[voltages.length - 1] * voltageScale;
+        } else {
+          const t0 = normalizedTimes[j], t1 = normalizedTimes[j + 1];
+          const v0 = voltages[j], v1 = voltages[j + 1];
+          const alpha = (t - t0) / (t1 - t0 || 1);
+          resampledVoltages[i] = (v0 + alpha * (v1 - v0)) * voltageScale;
+        }
+      }
+
+      // Single lead - assign to Lead II (most common for rhythm strips)
+      leads_uV['II'] = Array.from(resampledVoltages);
+
+      // Generate synthetic versions of other leads based on Lead II
+      // This is approximate but allows the UI to work
+      leads_uV['I'] = leads_uV['II'].map(v => v * 0.6);
+      leads_uV['III'] = leads_uV['II'].map((v, i) => leads_uV['II'][i] - leads_uV['I'][i]);
+      leads_uV['aVR'] = leads_uV['II'].map((v, i) => -(leads_uV['I'][i] + leads_uV['II'][i]) / 2);
+      leads_uV['aVL'] = leads_uV['II'].map((v, i) => leads_uV['I'][i] - leads_uV['II'][i] / 2);
+      leads_uV['aVF'] = leads_uV['II'].map((v, i) => leads_uV['II'][i] - leads_uV['I'][i] / 2);
+      // Precordial leads - approximate
+      leads_uV['V1'] = leads_uV['II'].map(v => v * -0.3);
+      leads_uV['V2'] = leads_uV['II'].map(v => v * -0.1);
+      leads_uV['V3'] = leads_uV['II'].map(v => v * 0.2);
+      leads_uV['V4'] = leads_uV['II'].map(v => v * 0.5);
+      leads_uV['V5'] = leads_uV['II'].map(v => v * 0.7);
+      leads_uV['V6'] = leads_uV['II'].map(v => v * 0.8);
+
+      showStatus(`Imported single-lead CSV (${rows.length} points) as Lead II`, 'success');
+
+    } else if (numCols >= 3) {
+      // Multi-column format: time + multiple leads
+      // Try to detect which columns are which leads from header
+      let leadColumns = {};
+
+      if (firstRowIsHeader) {
+        headerRow.forEach((h, idx) => {
+          if (idx === 0) return; // Skip time column
+          const leadMatch = h.match(/^(i{1,3}|avr|avl|avf|v[1-6])$/i);
+          if (leadMatch) {
+            let leadName = leadMatch[1].toUpperCase();
+            // Convert roman numerals
+            if (leadName === 'I') leadName = 'I';
+            else if (leadName === 'II') leadName = 'II';
+            else if (leadName === 'III') leadName = 'III';
+            leadColumns[leadName] = idx;
+          }
+        });
+      }
+
+      // If no headers matched, assume columns 1-12 are leads I-V6
+      if (Object.keys(leadColumns).length === 0) {
+        for (let i = 1; i < Math.min(numCols, 13); i++) {
+          leadColumns[LEAD_NAMES[i - 1]] = i;
+        }
+      }
+
+      // Extract time column
+      const times = rows.map(r => r[0]);
+      const timeRange = Math.max(...times) - Math.min(...times);
+      const timeScale = timeRange > 100 ? 0.001 : 1;
+      const minTime = Math.min(...times);
+      const normalizedTimes = times.map(t => (t - minTime) * timeScale);
+      duration_s = Math.max(...normalizedTimes);
+
+      // Detect voltage scale from first lead's data
+      const firstLeadIdx = Object.values(leadColumns)[0];
+      const firstLeadValues = rows.map(r => r[firstLeadIdx]);
+      const maxV = Math.max(...firstLeadValues.map(Math.abs));
+      const voltageScale = maxV > 100 ? 1 : 1000;
+
+      // Resample each lead
+      const numSamples = Math.round(duration_s * fs);
+
+      for (const [leadName, colIdx] of Object.entries(leadColumns)) {
+        const voltages = rows.map(r => r[colIdx]);
+        const resampled = new Float32Array(numSamples);
+
+        for (let i = 0; i < numSamples; i++) {
+          const t = i / fs;
+          let j = 0;
+          while (j < normalizedTimes.length - 1 && normalizedTimes[j + 1] < t) j++;
+
+          if (j >= normalizedTimes.length - 1) {
+            resampled[i] = voltages[voltages.length - 1] * voltageScale;
+          } else {
+            const t0 = normalizedTimes[j], t1 = normalizedTimes[j + 1];
+            const v0 = voltages[j], v1 = voltages[j + 1];
+            const alpha = (t - t0) / (t1 - t0 || 1);
+            resampled[i] = (v0 + alpha * (v1 - v0)) * voltageScale;
+          }
+        }
+
+        leads_uV[leadName] = Array.from(resampled);
+      }
+
+      // Fill in missing leads if we have at least limb leads
+      const hasI = 'I' in leads_uV;
+      const hasII = 'II' in leads_uV;
+      const hasIII = 'III' in leads_uV;
+
+      if (hasI && hasII && !hasIII) {
+        leads_uV['III'] = leads_uV['I'].map((v, i) => leads_uV['II'][i] - v);
+      }
+      if (!('aVR' in leads_uV) && hasI && hasII) {
+        leads_uV['aVR'] = leads_uV['I'].map((v, i) => -(v + leads_uV['II'][i]) / 2);
+      }
+      if (!('aVL' in leads_uV) && hasI && hasII) {
+        leads_uV['aVL'] = leads_uV['I'].map((v, i) => v - leads_uV['II'][i] / 2);
+      }
+      if (!('aVF' in leads_uV) && hasI && hasII) {
+        leads_uV['aVF'] = leads_uV['II'].map((v, i) => v - leads_uV['I'][i] / 2);
+      }
+
+      // Fill in missing precordial leads with zeros
+      for (const lead of LEAD_NAMES) {
+        if (!(lead in leads_uV)) {
+          leads_uV[lead] = new Array(numSamples).fill(0);
+        }
+      }
+
+      showStatus(`Imported ${Object.keys(leadColumns).length}-lead CSV (${rows.length} points)`, 'success');
+    }
+
+    // Build ECG data structure
+    const ecgData = {
+      fs: fs,
+      duration_s: duration_s,
+      leads_uV: leads_uV,
+      targets: {
+        synthetic: false,
+        imported: true,
+        source: 'csv',
+        filename: filename,
+        dx: 'Imported ECG'
+      },
+      integrity: {
+        format: 'csv_import',
+        original_points: rows.length,
+        resampled_to_hz: fs
+      }
+    };
+
+    return ecgData;
+
+  } catch (err) {
+    console.error('CSV parse error:', err);
+    showStatus('Failed to parse CSV: ' + err.message, 'error');
+    return null;
+  }
+}
+
+// Automatic grid detection using FFT-like frequency analysis
+function detectGridSpacing(img) {
+  try {
+    // Create a canvas to analyze the image
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Use a reasonable size for analysis
+    const maxSize = 800;
+    const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Detect red/pink grid lines (ECG paper is typically red grid)
+    // We'll look for horizontal lines and measure their spacing
+    const rowRedness = [];
+    const colRedness = [];
+
+    // Calculate "redness" for each row and column
+    for (let y = 0; y < canvas.height; y++) {
+      let rowSum = 0;
+      for (let x = 0; x < canvas.width; x++) {
+        const i = (y * canvas.width + x) * 4;
+        const r = data[i], g = data[i+1], b = data[i+2];
+        // Red-ish pixels (more red than green/blue)
+        if (r > 100 && r > g * 1.2 && r > b * 1.2) {
+          rowSum++;
+        }
+      }
+      rowRedness.push(rowSum);
+    }
+
+    for (let x = 0; x < canvas.width; x++) {
+      let colSum = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        const i = (y * canvas.width + x) * 4;
+        const r = data[i], g = data[i+1], b = data[i+2];
+        if (r > 100 && r > g * 1.2 && r > b * 1.2) {
+          colSum++;
+        }
+      }
+      colRedness.push(colSum);
+    }
+
+    // Find peaks in the redness arrays (these are grid lines)
+    const findPeaks = (arr, threshold) => {
+      const peaks = [];
+      const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const thresh = mean * threshold;
+
+      for (let i = 2; i < arr.length - 2; i++) {
+        if (arr[i] > thresh &&
+            arr[i] > arr[i-1] && arr[i] > arr[i+1] &&
+            arr[i] > arr[i-2] && arr[i] > arr[i+2]) {
+          peaks.push(i);
+        }
+      }
+      return peaks;
+    };
+
+    const verticalPeaks = findPeaks(colRedness, 1.5);
+
+    if (verticalPeaks.length < 5) {
+      return null; // Not enough grid lines detected
+    }
+
+    // Calculate spacings between consecutive peaks
+    const spacings = [];
+    for (let i = 1; i < verticalPeaks.length; i++) {
+      spacings.push(verticalPeaks[i] - verticalPeaks[i-1]);
+    }
+
+    // Find the most common spacing (mode)
+    const spacingCounts = {};
+    spacings.forEach(s => {
+      // Round to nearest 2 pixels for grouping
+      const rounded = Math.round(s / 2) * 2;
+      spacingCounts[rounded] = (spacingCounts[rounded] || 0) + 1;
+    });
+
+    let bestSpacing = 0;
+    let bestCount = 0;
+    for (const [spacing, count] of Object.entries(spacingCounts)) {
+      if (count > bestCount) {
+        bestCount = count;
+        bestSpacing = parseInt(spacing);
+      }
+    }
+
+    if (bestSpacing < 5 || bestCount < 3) {
+      return null; // Spacing too small or inconsistent
+    }
+
+    // Determine if this is 1mm or 5mm grid spacing
+    // Standard ECG: 1mm = 0.04s at 25mm/s, 5mm = 0.2s (big box)
+    // Check if there's a 5x multiple pattern
+    const smallSpacing = bestSpacing;
+
+    // Assume detected spacing is 1mm small boxes
+    // Convert to pixels per mm (accounting for image scaling)
+    const pxPerMm = smallSpacing / scale;
+
+    // Confidence based on consistency of spacing detection
+    const variance = spacings.reduce((sum, s) => sum + Math.pow(s - bestSpacing, 2), 0) / spacings.length;
+    const stdDev = Math.sqrt(variance);
+    const confidence = Math.max(0, 1 - (stdDev / bestSpacing));
+
+    return {
+      pxPerMm: pxPerMm,
+      smallBoxPx: smallSpacing,
+      bigBoxPx: smallSpacing * 5,
+      confidence: confidence,
+      gridLines: verticalPeaks.length
+    };
+
+  } catch (err) {
+    console.error('Grid detection failed:', err);
+    return null;
+  }
+}
+
+// Digitize ECG trace from uploaded image
+window.digitizeECG = async function() {
+  if (!imageMode || !uploadedImage) {
+    showStatus('Upload an image first', 'warning');
+    return;
+  }
+
+  // Need calibration for accurate digitization
+  if (!imageCalibration?.calibrated) {
+    showStatus('Please calibrate the grid first for accurate digitization', 'warning');
+    startCalibration();
+    return;
+  }
+
+  showStatus('Digitizing ECG trace...', 'info', 0);
+
+  try {
+    // Small delay to let the UI update
+    await new Promise(r => setTimeout(r, 50));
+
+    const result = extractWaveformFromImage(uploadedImage, imageCalibration);
+
+    if (!result || !result.leads_uV || Object.keys(result.leads_uV).length === 0) {
+      showStatus('Could not detect ECG trace. Try a clearer image.', 'error');
+      return;
+    }
+
+    // Create ECG data structure matching synthetic format
+    ecgData = {
+      fs: result.fs,
+      duration_s: result.duration_s,
+      leads_uV: result.leads_uV,
+      targets: {
+        synthetic: false,
+        digitized: true,
+        source: uploadedImageName,
+        age_years: null,
+        sex: null,
+        dx: 'Digitized from image'
+      },
+      integrity: {
+        digitization_method: 'trace_extraction',
+        source_pxPerMm: imageCalibration.pxPerMm,
+        source_paperSpeed: parseInt(document.getElementById('importSpeed').value),
+        source_gain: parseInt(document.getElementById('importGain').value)
+      }
+    };
+
+    // Exit image mode - now it's a real ECG
+    imageMode = false;
+    uploadedImage = null;
+    document.getElementById('calibrationControls').style.display = 'none';
+    document.getElementById('imageInput').value = '';
+
+    // Run standard ECG analysis
+    updateAfterLoad();
+
+    const leadCount = Object.keys(result.leads_uV).length;
+    showStatus(`Digitized ${leadCount} lead(s) — now a full ECG!`, 'success');
+
+  } catch (err) {
+    console.error('Digitization failed:', err);
+    showStatus('Digitization failed: ' + err.message, 'error');
+  }
+};
+
+function extractWaveformFromImage(img, calibration) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const width = canvas.width;
+  const height = canvas.height;
+
+  const pxPerMm = calibration.pxPerMm;
+  const paperSpeed = parseInt(document.getElementById('importSpeed').value); // mm/s
+  const gain = parseInt(document.getElementById('importGain').value); // mm/mV
+
+  // Detect lead regions (horizontal bands where traces are)
+  const leadRegions = detectLeadRegions(data, width, height);
+
+  if (leadRegions.length === 0) {
+    // Fall back to single lead using full image
+    leadRegions.push({ y1: 0, y2: height, label: 'II' });
+  }
+
+  const leads_uV = {};
+  const fs = 500; // Output sample rate
+
+  // Process each lead region
+  for (const region of leadRegions) {
+    const trace = extractTraceFromRegion(data, width, height, region.y1, region.y2);
+
+    if (trace.length < 10) continue;
+
+    // Convert pixel positions to voltage
+    const centerY = (region.y1 + region.y2) / 2;
+    const voltages = trace.map(t => {
+      if (t.y === null) return 0;
+      // y increases downward, voltage increases upward
+      const mm_from_center = (centerY - t.y) / pxPerMm;
+      const mV = mm_from_center / gain;
+      return Math.round(mV * 1000); // Convert to µV
+    });
+
+    // Resample to target sample rate
+    const duration_s = (trace.length / pxPerMm) / paperSpeed;
+    const targetSamples = Math.round(duration_s * fs);
+    const resampled = resampleSignal(voltages, targetSamples);
+
+    // Apply light smoothing to reduce digitization noise
+    const smoothed = smoothSignal(resampled, 3);
+
+    leads_uV[region.label] = smoothed;
+  }
+
+  // If we only got one lead, also create derived leads for compatibility
+  if (Object.keys(leads_uV).length === 1) {
+    const mainLead = Object.values(leads_uV)[0];
+    // Just use the same trace for lead II if that's all we have
+    if (!leads_uV['II']) {
+      leads_uV['II'] = mainLead;
+    }
+  }
+
+  const duration_s = Object.values(leads_uV)[0]?.length / fs || 10;
+
+  return {
+    leads_uV,
+    fs,
+    duration_s
+  };
+}
+
+function detectLeadRegions(data, width, height) {
+  // Scan for horizontal bands of trace activity
+  // Look for rows with dark pixels (trace) vs light pixels (background)
+
+  const rowDarkness = [];
+  for (let y = 0; y < height; y++) {
+    let darkCount = 0;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      const brightness = (r + g + b) / 3;
+      // Count dark pixels (trace is usually black/dark)
+      if (brightness < 80) darkCount++;
+    }
+    rowDarkness.push(darkCount);
+  }
+
+  // Find regions with significant trace activity
+  const threshold = Math.max(...rowDarkness) * 0.1;
+  const regions = [];
+  let inRegion = false;
+  let regionStart = 0;
+
+  for (let y = 0; y < height; y++) {
+    if (rowDarkness[y] > threshold && !inRegion) {
+      inRegion = true;
+      regionStart = y;
+    } else if (rowDarkness[y] <= threshold && inRegion) {
+      inRegion = false;
+      if (y - regionStart > 20) { // Minimum region height
+        regions.push({ y1: regionStart, y2: y });
+      }
+    }
+  }
+
+  if (inRegion && height - regionStart > 20) {
+    regions.push({ y1: regionStart, y2: height });
+  }
+
+  // Assign standard lead labels based on position
+  const leadLabels = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+  regions.forEach((r, i) => {
+    r.label = leadLabels[i] || `Lead${i+1}`;
+  });
+
+  return regions;
+}
+
+function extractTraceFromRegion(data, width, height, y1, y2) {
+  const trace = [];
+
+  for (let x = 0; x < width; x++) {
+    // Find the darkest pixel in this column within the region
+    let darkestY = null;
+    let darkestValue = 255;
+
+    for (let y = y1; y < y2; y++) {
+      const i = (y * width + x) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+
+      // Look for dark pixels that are NOT red (exclude grid lines)
+      const isRed = r > 100 && r > g * 1.3 && r > b * 1.3;
+      if (isRed) continue;
+
+      const brightness = (r + g + b) / 3;
+
+      if (brightness < darkestValue && brightness < 120) {
+        darkestValue = brightness;
+        darkestY = y;
+      }
+    }
+
+    trace.push({ x, y: darkestY, brightness: darkestValue });
+  }
+
+  // Fill gaps using interpolation
+  for (let i = 1; i < trace.length - 1; i++) {
+    if (trace[i].y === null) {
+      // Find nearest valid points
+      let left = i - 1;
+      while (left >= 0 && trace[left].y === null) left--;
+
+      let right = i + 1;
+      while (right < trace.length && trace[right].y === null) right++;
+
+      if (left >= 0 && right < trace.length && trace[left].y !== null && trace[right].y !== null) {
+        // Interpolate
+        const t = (i - left) / (right - left);
+        trace[i].y = trace[left].y + t * (trace[right].y - trace[left].y);
+      }
+    }
+  }
+
+  return trace;
+}
+
+function resampleSignal(signal, targetLength) {
+  if (signal.length === targetLength) return signal;
+
+  const result = new Array(targetLength);
+  const ratio = signal.length / targetLength;
+
+  for (let i = 0; i < targetLength; i++) {
+    const srcIdx = i * ratio;
+    const srcIdxFloor = Math.floor(srcIdx);
+    const srcIdxCeil = Math.min(srcIdxFloor + 1, signal.length - 1);
+    const t = srcIdx - srcIdxFloor;
+
+    result[i] = Math.round(signal[srcIdxFloor] * (1 - t) + signal[srcIdxCeil] * t);
+  }
+
+  return result;
+}
+
+function smoothSignal(signal, windowSize) {
+  const result = new Array(signal.length);
+  const halfWindow = Math.floor(windowSize / 2);
+
+  for (let i = 0; i < signal.length; i++) {
+    let sum = 0;
+    let count = 0;
+
+    for (let j = -halfWindow; j <= halfWindow; j++) {
+      const idx = i + j;
+      if (idx >= 0 && idx < signal.length) {
+        sum += signal[idx];
+        count++;
+      }
+    }
+
+    result[i] = Math.round(sum / count);
+  }
+
+  return result;
+}
+
+window.cancelCalibration = function() {
+  calibrationMode = false;
+  calibrationPoint1 = null;
+
+  const statusEl = document.getElementById('calibrationStatus');
+  statusEl.style.display = 'none';
+
+  document.getElementById('calibrateBtn').textContent = 'Calibrate Grid';
+  document.getElementById('calibrateBtn').onclick = startCalibration;
+  document.getElementById('c').style.cursor = 'default';
+
+  clearStatus();
+  redraw();
+};
+
+function handleCalibrationClick(x, y) {
+  const statusEl = document.getElementById('calibrationStatus');
+
+  if (!calibrationPoint1) {
+    // First point
+    calibrationPoint1 = { x, y };
+    statusEl.innerHTML = '<strong>Step 2:</strong> Click the RIGHT edge of those same 5 boxes';
+
+    // Draw marker at first point
+    redraw();
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#1b6dff';
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+  } else {
+    // Second point - calculate calibration
+    const dx = Math.abs(x - calibrationPoint1.x);
+
+    if (dx < 20) {
+      showStatus('Points too close together. Try again.', 'error');
+      calibrationPoint1 = null;
+      statusEl.innerHTML = '<strong>Step 1:</strong> Click the LEFT edge of 5 big grid boxes (25mm)';
+      return;
+    }
+
+    // 5 big boxes = 25mm
+    const pxPerMm = dx / 25;
+
+    // Store calibration
+    imageCalibration = {
+      ...imageCalibration,
+      pxPerMm: pxPerMm,
+      calibrated: true
+    };
+
+    // Complete calibration
+    calibrationMode = false;
+    calibrationPoint1 = null;
+
+    statusEl.innerHTML = `<strong>Calibrated:</strong> ${pxPerMm.toFixed(2)} px/mm (${(pxPerMm * 25).toFixed(0)}px = 25mm)`;
+    statusEl.style.color = '#2e7d32';
+
+    document.getElementById('calibrateBtn').textContent = 'Recalibrate';
+    document.getElementById('calibrateBtn').onclick = startCalibration;
+    document.getElementById('c').style.cursor = 'default';
+
+    showStatus(`Calibration complete: ${pxPerMm.toFixed(2)} pixels/mm — measurements are now accurate`, 'success');
+    redraw();
+  }
+}
 
 // ============================================================================
 // UPDATE AFTER LOAD
@@ -1003,6 +2121,12 @@ function redraw() {
   ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--paper');
   ctx.fillRect(0, 0, rect.width, rect.height);
 
+  // Handle uploaded image mode
+  if (imageMode && uploadedImage) {
+    drawUploadedImage(ctx, rect.width, rect.height);
+    return;
+  }
+
   if (!ecgData) {
     ctx.fillStyle = '#888';
     ctx.font = '16px system-ui';
@@ -1030,6 +2154,61 @@ function redraw() {
   }
 }
 
+function drawUploadedImage(ctx, w, h) {
+  const img = uploadedImage;
+  const speed = parseInt(document.getElementById('importSpeed')?.value || 25);
+  const gain = parseInt(document.getElementById('importGain')?.value || 10);
+  const pxmm = parseInt(document.getElementById('pxmm')?.value || 4);
+
+  // Draw grid first (helps with calibration)
+  drawGrid(ctx, w, h, pxmm);
+
+  // Calculate scaling to fit image while maintaining aspect ratio
+  const imgAspect = img.width / img.height;
+  const canvasAspect = w / h;
+
+  let drawW, drawH, offsetX, offsetY;
+
+  if (imgAspect > canvasAspect) {
+    // Image is wider than canvas
+    drawW = w;
+    drawH = w / imgAspect;
+    offsetX = 0;
+    offsetY = (h - drawH) / 2;
+  } else {
+    // Image is taller than canvas
+    drawH = h;
+    drawW = h * imgAspect;
+    offsetX = (w - drawW) / 2;
+    offsetY = 0;
+  }
+
+  // Draw the image
+  ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+
+  // Draw info overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(5, 5, 180, 50);
+  ctx.fillStyle = '#fff';
+  ctx.font = '11px system-ui';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Speed: ${speed} mm/s | Gain: ${gain} mm/mV`, 10, 22);
+  ctx.fillText(`Image: ${uploadedImageName || 'Unknown'}`, 10, 38);
+
+  // Draw calipers on top
+  drawAllCalipers(ctx, w, h);
+
+  // Draw in-progress caliper
+  if (activeCaliperPoint && lastMousePos) {
+    let endPoint = lastMousePos;
+    if (shiftHeld) {
+      endPoint = constrainPoint(endPoint.x, endPoint.y, activeCaliperPoint.x, activeCaliperPoint.y, true);
+    }
+    const color = CALIPER_COLORS[nextCaliperColor % CALIPER_COLORS.length];
+    drawSingleCaliper(ctx, activeCaliperPoint, endPoint, color, false, null);
+  }
+}
+
 function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, showFid) {
   const leadOrder = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
   const available = leadOrder.filter(l => leads[l]);
@@ -1039,7 +2218,42 @@ function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, sho
   // Draw grid
   drawGrid(ctx, w, h, pxPerMm);
 
-  // Draw each lead
+  const pxPerSample = (pxPerMm * mmPerSec) / fs;
+  const uvPerPx = 1000 / (pxPerMm * mmPerMV);
+
+  // Check if we should show reference overlay
+  const showOverlay = document.getElementById('showOverlay')?.checked && referenceECG;
+  const showDiff = document.getElementById('showDiff')?.checked;
+
+  // Draw reference ECG first (underneath) if overlay enabled
+  if (showOverlay && referenceECG?.leads_uV) {
+    const refLeads = referenceECG.leads_uV;
+    const refFs = referenceECG.fs || fs;
+    const refPxPerSample = (pxPerMm * mmPerSec) / refFs;
+
+    available.forEach((lead, i) => {
+      if (!refLeads[lead]) return;
+      const y0 = (i + 0.5) * rowH;
+      const signal = refLeads[lead];
+
+      ctx.strokeStyle = 'rgba(0, 100, 200, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+
+      for (let j = 0; j < signal.length; j++) {
+        const x = 40 + j * refPxPerSample + panOffset;
+        if (x < 0 || x > w) continue;
+        const yVal = y0 - signal[j] / uvPerPx;
+        if (j === 0) ctx.moveTo(x, yVal);
+        else ctx.lineTo(x, yVal);
+      }
+      ctx.stroke();
+    });
+  }
+
+  // Draw each lead (current ECG)
   available.forEach((lead, i) => {
     const y0 = (i + 0.5) * rowH;
     const signal = leads[lead];
@@ -1050,15 +2264,29 @@ function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, sho
     ctx.textAlign = 'left';
     ctx.fillText(lead, 8, y0 - rowH/2 + 14);
 
-    // Draw trace (slightly thicker for thermal printer look)
-    ctx.strokeStyle = '#1a1a1a';
+    // Determine trace color based on diff highlighting
+    let strokeColor = '#1a1a1a';
+    if (showDiff && showOverlay && referenceECG?.leads_uV?.[lead]) {
+      // Calculate RMS difference for this lead
+      const refSignal = referenceECG.leads_uV[lead];
+      const minLen = Math.min(signal.length, refSignal.length);
+      let sumSq = 0;
+      for (let k = 0; k < minLen; k++) {
+        sumSq += Math.pow(signal[k] - refSignal[k], 2);
+      }
+      const rms = Math.sqrt(sumSq / minLen);
+      // Color based on difference magnitude (red = high, green = low)
+      if (rms > 300) strokeColor = '#c62828';      // Major difference (red)
+      else if (rms > 100) strokeColor = '#ef6c00'; // Moderate (orange)
+      else strokeColor = '#2e7d32';                // Similar (green)
+    }
+
+    // Draw trace
+    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1.3;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-
-    const pxPerSample = (pxPerMm * mmPerSec) / fs;
-    const uvPerPx = 1000 / (pxPerMm * mmPerMV);
 
     for (let j = 0; j < signal.length; j++) {
       const x = 40 + j * pxPerSample + panOffset;
@@ -1077,6 +2305,15 @@ function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, sho
 
   // Draw calipers (advanced system)
   drawAllCalipers(ctx, w, h);
+
+  // Draw legend if overlay is active
+  if (showOverlay) {
+    ctx.font = '10px system-ui';
+    ctx.fillStyle = 'rgba(0, 100, 200, 0.8)';
+    ctx.fillText('Reference', w - 70, 15);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillText('Current', w - 70, 28);
+  }
 }
 
 function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, showFid) {
@@ -1093,6 +2330,29 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
   const rowH = (h - 100) / 3;
   const rhythmH = 80;
 
+  // Check if we should show reference overlay
+  const showOverlay = document.getElementById('showOverlay')?.checked && referenceECG;
+  const refLeads = referenceECG?.leads_uV;
+  const refFs = referenceECG?.fs || fs;
+
+  // Helper to draw a trace segment
+  const drawTrace = (signal, x0, y0, ci, samplesPerCol, pxPerSample, uvPerPx, color) => {
+    const startSample = ci * samplesPerCol;
+    const endSample = Math.min(startSample + samplesPerCol, signal.length);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let j = startSample; j < endSample; j++) {
+      const x = x0 + (j - startSample) * pxPerSample;
+      const yVal = y0 - signal[j] / uvPerPx;
+      if (j === startSample) ctx.moveTo(x, yVal);
+      else ctx.lineTo(x, yVal);
+    }
+    ctx.stroke();
+  };
+
   leadGroups.forEach((row, ri) => {
     row.forEach((lead, ci) => {
       if (!leads[lead]) return;
@@ -1104,28 +2364,20 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
       ctx.font = 'bold 10px "Courier New", Consolas, monospace';
       ctx.fillText(lead, x0, ri * rowH + 14);
 
-      // Trace (2.5 seconds per column)
       const signal = leads[lead];
       const samplesPerCol = Math.floor(2.5 * fs);
-      const startSample = ci * samplesPerCol;
-      const endSample = Math.min(startSample + samplesPerCol, signal.length);
-
       const pxPerSample = (colW - 20) / samplesPerCol;
       const uvPerPx = 1000 / (pxPerMm * mmPerMV);
 
-      ctx.strokeStyle = '#1a1a1a';
-      ctx.lineWidth = 1.3;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-
-      for (let j = startSample; j < endSample; j++) {
-        const x = x0 + (j - startSample) * pxPerSample;
-        const yVal = y0 - signal[j] / uvPerPx;
-        if (j === startSample) ctx.moveTo(x, yVal);
-        else ctx.lineTo(x, yVal);
+      // Draw reference first if overlay enabled
+      if (showOverlay && refLeads?.[lead]) {
+        const refSamplesPerCol = Math.floor(2.5 * refFs);
+        const refPxPerSample = (colW - 20) / refSamplesPerCol;
+        drawTrace(refLeads[lead], x0, y0, ci, refSamplesPerCol, refPxPerSample, uvPerPx, 'rgba(0, 100, 200, 0.5)');
       }
-      ctx.stroke();
+
+      // Draw current trace
+      drawTrace(signal, x0, y0, ci, samplesPerCol, pxPerSample, uvPerPx, '#1a1a1a');
     });
   });
 
@@ -1135,10 +2387,30 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
   ctx.font = 'bold 10px "Courier New", Consolas, monospace';
   ctx.fillText('II (rhythm)', 10, h - rhythmH);
 
+  const uvPerPx = 1000 / (pxPerMm * mmPerMV);
+
+  // Draw reference rhythm strip if overlay enabled
+  if (showOverlay && refLeads?.II) {
+    const refSignal = refLeads.II;
+    const refPxPerSample = (w - 40) / refSignal.length;
+    ctx.strokeStyle = 'rgba(0, 100, 200, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let j = 0; j < refSignal.length; j++) {
+      const x = 20 + j * refPxPerSample;
+      const yVal = rhythmY - refSignal[j] / uvPerPx;
+      if (j === 0) ctx.moveTo(x, yVal);
+      else ctx.lineTo(x, yVal);
+    }
+    ctx.stroke();
+  }
+
+  // Draw current rhythm strip
   if (leads.II) {
     const signal = leads.II;
     const pxPerSample = (w - 40) / signal.length;
-    const uvPerPx = 1000 / (pxPerMm * mmPerMV);
 
     ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth = 1.3;
@@ -1157,6 +2429,15 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
 
   // Draw calipers (advanced system)
   drawAllCalipers(ctx, w, h);
+
+  // Draw legend if overlay is active
+  if (showOverlay) {
+    ctx.font = '10px system-ui';
+    ctx.fillStyle = 'rgba(0, 100, 200, 0.8)';
+    ctx.fillText('Reference', w - 70, 15);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillText('Current', w - 70, 28);
+  }
 }
 
 function drawGrid(ctx, w, h, pxPerMm) {
@@ -1235,15 +2516,20 @@ function drawFiducials(ctx, signal, fs, meas, y0, pxPerSample) {
 // ============================================================================
 
 function getCaliperScaling() {
-  const speed = parseInt(document.getElementById('speed').value);
-  const gain = parseInt(document.getElementById('gain').value);
+  // Use import settings for uploaded images, regular settings for synthetic ECGs
+  const speed = imageMode
+    ? parseInt(document.getElementById('importSpeed')?.value || 25)
+    : parseInt(document.getElementById('speed').value);
+  const gain = imageMode
+    ? parseInt(document.getElementById('importGain')?.value || 10)
+    : parseInt(document.getElementById('gain').value);
   const pxmm = parseInt(document.getElementById('pxmm').value);
   const fs = ecgData?.fs || 1000;
 
   const pxPerSample = (pxmm * speed) / fs;
   const uvPerPx = 1000 / (pxmm * gain);
 
-  return { pxPerSample, uvPerPx, fs, pxmm };
+  return { pxPerSample, uvPerPx, fs, pxmm, speed, gain };
 }
 
 function snapToRPeak(x, tolerance = 15) {
@@ -1287,13 +2573,32 @@ function constrainPoint(x, y, refX, refY, shiftHeld) {
 }
 
 function calculateMeasurement(p1, p2) {
-  const { pxPerSample, uvPerPx, fs } = getCaliperScaling();
+  const { pxPerSample, uvPerPx, fs, pxmm, speed, gain } = getCaliperScaling();
 
   const dx = Math.abs(p2.x - p1.x);
   const dy = p1.y - p2.y; // Inverted because canvas Y is down
 
-  const dt_ms = dx / pxPerSample / fs * 1000;
-  const dv_uv = dy * uvPerPx;
+  let dt_ms, dv_uv;
+
+  if (imageMode) {
+    // For uploaded images: use calibrated pxPerMm if available, otherwise estimate
+    const actualPxPerMm = (imageCalibration?.calibrated && imageCalibration?.pxPerMm)
+      ? imageCalibration.pxPerMm
+      : pxmm; // Fallback to display setting (less accurate)
+
+    // Time: dx pixels → mm → seconds → ms
+    const dx_mm = dx / actualPxPerMm;
+    dt_ms = (dx_mm / speed) * 1000;
+
+    // Voltage: dy pixels → mm → mV → µV
+    const dy_mm = Math.abs(dy) / actualPxPerMm;
+    dv_uv = (dy_mm / gain) * 1000 * Math.sign(dy);
+  } else {
+    // For synthetic ECGs: use sample-based calculation
+    dt_ms = dx / pxPerSample / fs * 1000;
+    dv_uv = dy * uvPerPx;
+  }
+
   const rate_bpm = dt_ms > 0 ? 60000 / dt_ms : 0;
 
   return { dt_ms, dv_uv, rate_bpm };
@@ -1501,15 +2806,29 @@ window.deleteCaliper = function(id) {
   redraw();
 };
 
+function updateCaliperStatus(text) {
+  const statusEl = document.getElementById('caliperStatus');
+  if (statusEl) {
+    statusEl.querySelector('span:last-child').textContent = text;
+  }
+}
+
 window.toggleCalipers = function() {
   calipersActive = !calipersActive;
   const btn = document.getElementById('calBtn');
+  const statusEl = document.getElementById('caliperStatus');
+
   btn.textContent = calipersActive ? 'Calipers: ON' : 'Calipers: OFF';
   btn.classList.toggle('primary', !calipersActive);
   document.getElementById('c').style.cursor = calipersActive ? 'crosshair' : 'default';
 
+  // Show/hide floating status indicator
   if (calipersActive) {
+    statusEl.classList.add('active');
+    updateCaliperStatus('Caliper Mode: Click and drag to measure');
     document.getElementById('caliperList').style.display = 'block';
+  } else {
+    statusEl.classList.remove('active');
   }
 };
 
@@ -1526,11 +2845,17 @@ window.clearAllCalipers = function() {
 const canvas = document.getElementById('c');
 
 canvas.addEventListener('mousedown', (e) => {
-  if (!calipersActive) return;
-
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
+
+  // Handle calibration mode
+  if (calibrationMode && imageMode) {
+    handleCalibrationClick(x, y);
+    return;
+  }
+
+  if (!calipersActive) return;
 
   // Check for handle drag
   const handle = hitTestCaliperHandle(x, y);
@@ -1559,6 +2884,7 @@ canvas.addEventListener('mousedown', (e) => {
   if (!activeCaliperPoint) {
     activeCaliperPoint = { x: snappedX, y };
     selectedCaliperId = null;
+    updateCaliperStatus('Drag to second point, then release');
   }
 });
 
@@ -1652,6 +2978,12 @@ canvas.addEventListener('mouseup', (e) => {
     caliperMeasurements.push(measurement);
     selectedCaliperId = measurement.id;
     updateCaliperList();
+
+    // Show success feedback briefly
+    const { dt_ms } = calculateMeasurement(measurement.p1, measurement.p2);
+    updateCaliperStatus(`Measured: ${Math.round(dt_ms)} ms — Click and drag to add more`);
+  } else {
+    updateCaliperStatus('Caliper Mode: Click and drag to measure');
   }
 
   activeCaliperPoint = null;
@@ -1686,6 +3018,9 @@ document.addEventListener('keydown', (e) => {
     activeCaliperPoint = null;
     selectedCaliperId = null;
     updateCaliperList();
+    if (calipersActive) {
+      updateCaliperStatus('Caliper Mode: Click and drag to measure');
+    }
     redraw();
   }
 
@@ -1699,6 +3034,82 @@ document.addEventListener('keyup', (e) => {
     shiftHeld = false;
   }
 });
+
+// Touch event support for trackpad and touch devices
+let touchStartPoint = null;
+
+canvas.addEventListener('touchstart', (e) => {
+  if (!calipersActive || e.touches.length !== 1) return;
+  e.preventDefault();
+
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const x = touch.clientX - rect.left;
+  const y = touch.clientY - rect.top;
+
+  // Check for caliper selection first
+  const hitId = hitTestCaliper(x, y);
+  if (hitId) {
+    selectedCaliperId = hitId;
+    updateCaliperList();
+    redraw();
+    return;
+  }
+
+  let snappedX = snapToRPeak(x);
+  touchStartPoint = { x: snappedX, y };
+  activeCaliperPoint = touchStartPoint;
+  updateCaliperStatus('Drag to second point, then lift finger');
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (!calipersActive || !touchStartPoint || e.touches.length !== 1) return;
+  e.preventDefault();
+
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  lastMousePos = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+  redraw();
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  if (!calipersActive || !touchStartPoint) return;
+  e.preventDefault();
+
+  const touch = e.changedTouches[0];
+  const rect = canvas.getBoundingClientRect();
+  let x = touch.clientX - rect.left;
+  let y = touch.clientY - rect.top;
+
+  x = snapToRPeak(x);
+
+  const dist = Math.hypot(x - touchStartPoint.x, y - touchStartPoint.y);
+  if (dist > 20) {  // Slightly more forgiving threshold for touch
+    const color = CALIPER_COLORS[nextCaliperColor % CALIPER_COLORS.length];
+    nextCaliperColor++;
+
+    const measurement = {
+      id: 'cal_' + Date.now(),
+      p1: touchStartPoint,
+      p2: { x, y },
+      color
+    };
+
+    caliperMeasurements.push(measurement);
+    selectedCaliperId = measurement.id;
+    updateCaliperList();
+
+    const { dt_ms } = calculateMeasurement(measurement.p1, measurement.p2);
+    updateCaliperStatus(`Measured: ${Math.round(dt_ms)} ms — Tap and drag to add more`);
+  } else {
+    updateCaliperStatus('Caliper Mode: Tap and drag to measure');
+  }
+
+  touchStartPoint = null;
+  activeCaliperPoint = null;
+  lastMousePos = null;
+  redraw();
+}, { passive: false });
 
 // ============================================================================
 // EXPORT FUNCTIONS
@@ -1723,16 +3134,62 @@ window.exportPNG = function() {
 };
 
 window.exportJSON = function() {
-  if (!ecgData) {
+  if (!ecgData && !imageMode) {
     showStatus('Generate or load an ECG first', 'error');
     return;
   }
-  const blob = new Blob([JSON.stringify(ecgData, null, 2)], { type: 'application/json' });
+
+  let exportData;
+
+  if (imageMode && uploadedImage) {
+    // Export teaching case with image
+    const canvas = document.createElement('canvas');
+    canvas.width = uploadedImage.width;
+    canvas.height = uploadedImage.height;
+    canvas.getContext('2d').drawImage(uploadedImage, 0, 0);
+
+    exportData = {
+      type: 'teaching_case',
+      version: '1.0',
+      source: {
+        type: 'uploaded_image',
+        filename: uploadedImageName,
+        imageData: canvas.toDataURL('image/png'),
+        width: uploadedImage.width,
+        height: uploadedImage.height
+      },
+      calibration: {
+        paperSpeed_mm_s: parseInt(document.getElementById('importSpeed')?.value || 25),
+        gain_mm_mV: parseInt(document.getElementById('importGain')?.value || 10),
+        scale_pxmm: parseInt(document.getElementById('pxmm')?.value || 4),
+        pxPerMm: imageCalibration?.pxPerMm || null,
+        calibrated: imageCalibration?.calibrated || false
+      },
+      measurements: caliperMeasurements.map(m => {
+        const { dt_ms, dv_uv, rate_bpm } = calculateMeasurement(m.p1, m.p2);
+        return {
+          id: m.id,
+          color: m.color,
+          p1: m.p1,
+          p2: m.p2,
+          dt_ms: Math.round(dt_ms),
+          dv_uv: Math.round(dv_uv),
+          rate_bpm: Math.round(rate_bpm)
+        };
+      }),
+      exportedAt: new Date().toISOString()
+    };
+  } else {
+    // Export synthetic ECG
+    exportData = ecgData;
+  }
+
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
-  link.download = 'ecg-export.json';
+  link.download = imageMode ? 'teaching-case.json' : 'ecg-export.json';
   link.href = URL.createObjectURL(blob);
   link.click();
-  showStatus('JSON exported', 'success', 2000);
+  showStatus(imageMode ? 'Teaching case exported with measurements' : 'JSON exported', 'success', 2000);
 };
 
 window.exportCSV = function() {
