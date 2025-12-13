@@ -73,7 +73,7 @@ Goal: world-class ECG teaching lab — MUSE-style viewing/printing + explainable
 
 The following 8-step plan will elevate synthetic ECG realism to be indistinguishable from real ECGs for educational purposes.
 
-### Step 1: Refactor synthesis into 5 explicit modules (In Progress)
+### Step 1: Refactor synthesis into 5 explicit modules ✅
 Split `synthECG(...)` into independent, testable modules:
 
 1. **rhythmModel(params, seed)** → beatSchedule
@@ -84,26 +84,25 @@ Split `synthECG(...)` into independent, testable modules:
 
 **Done when**: Each module can be swapped and unit-tested in isolation.
 
-### Step 2: Upgrade morphology model (basis library)
-Replace simple Gaussian components with a wave "basis toolkit" in VCG/source domain:
+### Step 2: Upgrade morphology model (basis library) ✅
+Wave basis toolkit implemented in `ecg-synth-modules.js`:
 
 - **Asymmetric Gaussian**: σL ≠ σR for rise/decay asymmetry
 - **Generalized Gaussian**: Variable exponent p for pointiness control
-- **Hermite basis**: Capture notches/slurs in QRS
-- **Spline-defined loops**: 3D control points with time warping
+- **Hermite basis**: Capture notches/slurs in QRS (orders 0-4)
+- **Biphasic waves**: For complex T waves and U waves
+- **Sigmoid transitions**: For ST segment changes
+- **Phase-based waves**: Consistent morphology across HR changes
+- **Wave presets**: P_NORMAL, P_PEAKED, P_BIFID, QRS_NARROW, QRS_WIDE_RBBB, QRS_WIDE_LBBB, T_NORMAL, T_HYPERACUTE, T_INVERTED, T_BIPHASIC
 
-Add **time warping per beat**: Parameterize beat by phase φ ∈ [0,1] for consistent morphology across HR changes.
+### Step 3: Mathematically realistic rhythm generation ✅
+Age-appropriate HRV modeling implemented in `ecg-synth-modules.js`:
 
-**Done when**: QRS can be narrow/wide, notched, slurred, or RSR′ without per-lead hacks.
-
-### Step 3: Mathematically realistic rhythm generation
-Upgrade from simple jitter to point-process style beat scheduling:
-
-- Base RR: `RR0 = 60 / HR`
-- RSA + LF variability: `RR(t) = RR0 * (1 + A_rsa sin(2π f_rsa t + φ)) + LF_component + ε`
-- Arrhythmia state machine / Markov model for beat types
-
-**Done when**: HRV spectrum is plausible, arrhythmias produce realistic sequences.
+- **Age-dependent HRV parameters**: `getHRVParams(ageY)` returns RSA amplitude, respiratory frequency, LF/VLF components based on age (neonate → elderly)
+- **RSA + LF + VLF modulation**: `modulateRR()` implements `RR(t) = RR0 * (1 + A_rsa*sin(2π*f_rsa*t) + A_lf*sin(2π*f_lf*t) + A_vlf*sin(2π*f_vlf*t)) + ε`
+- **Arrhythmia state machine**: `EctopyStateMachine` class for realistic PAC/PVC clustering with refractory periods
+- **HRV metrics**: `computeHRVMetrics()` calculates SDNN, RMSSD, pNN50
+- **Output includes HRV**: Synthetic ECGs now include `targets.hrv` with computed metrics
 
 ### Step 4: Improved lead-field model
 Upgrade from fixed electrode vectors:

@@ -35,25 +35,541 @@ export function randn(rng) {
 }
 
 // ============================================================================
+// WAVE BASIS TOOLKIT (Step 2: Morphology Upgrade)
+// Provides primitives for realistic waveform generation in VCG domain
+// ============================================================================
+
+/**
+ * Standard Gaussian wave component
+ * @param {number} t - time
+ * @param {number} mu - center time
+ * @param {number} sigma - width
+ * @param {number} amp - amplitude
+ */
+export function gaussianWave(t, mu, sigma, amp) {
+  const x = (t - mu) / sigma;
+  return amp * Math.exp(-0.5 * x * x);
+}
+
+/**
+ * Asymmetric Gaussian - different rise/decay characteristics
+ * More realistic for P waves and T waves which have asymmetric shapes
+ * @param {number} t - time
+ * @param {number} mu - peak time
+ * @param {number} sigmaL - left (rise) sigma
+ * @param {number} sigmaR - right (decay) sigma
+ * @param {number} amp - amplitude
+ */
+export function asymmetricGaussian(t, mu, sigmaL, sigmaR, amp) {
+  const sigma = t < mu ? sigmaL : sigmaR;
+  const x = (t - mu) / sigma;
+  return amp * Math.exp(-0.5 * x * x);
+}
+
+/**
+ * Generalized Gaussian (super-Gaussian)
+ * Controls "pointiness" - p=2 is standard Gaussian, p>2 is flatter top, p<2 is sharper
+ * Useful for QRS (sharper) vs T wave (broader)
+ * @param {number} t - time
+ * @param {number} mu - center time
+ * @param {number} sigma - width
+ * @param {number} amp - amplitude
+ * @param {number} p - shape parameter (default 2 = standard Gaussian)
+ */
+export function generalizedGaussian(t, mu, sigma, amp, p = 2) {
+  const x = Math.abs((t - mu) / sigma);
+  return amp * Math.exp(-Math.pow(x, p) / 2);
+}
+
+/**
+ * Asymmetric Generalized Gaussian - combines asymmetry with shape control
+ * @param {number} t - time
+ * @param {number} mu - peak time
+ * @param {number} sigmaL - left sigma
+ * @param {number} sigmaR - right sigma
+ * @param {number} amp - amplitude
+ * @param {number} pL - left shape parameter
+ * @param {number} pR - right shape parameter
+ */
+export function asymmetricGeneralizedGaussian(t, mu, sigmaL, sigmaR, amp, pL = 2, pR = 2) {
+  const sigma = t < mu ? sigmaL : sigmaR;
+  const p = t < mu ? pL : pR;
+  const x = Math.abs((t - mu) / sigma);
+  return amp * Math.exp(-Math.pow(x, p) / 2);
+}
+
+/**
+ * Hermite function basis - useful for capturing notches and slurs in QRS
+ * Hermite functions are orthogonal and can represent complex morphologies
+ * @param {number} t - time (normalized)
+ * @param {number} n - order (0, 1, 2, 3, ...)
+ */
+export function hermiteFunction(t, n) {
+  // Hermite polynomials H_n(t) * exp(-t^2/2) / sqrt(2^n * n! * sqrt(pi))
+  const expTerm = Math.exp(-t * t / 2);
+
+  // First few Hermite polynomials
+  switch (n) {
+    case 0: return expTerm * 0.7511; // 1/pi^0.25
+    case 1: return expTerm * t * 1.0622; // sqrt(2)/pi^0.25
+    case 2: return expTerm * (t * t - 1) * 0.5311; // 1/(sqrt(2)*pi^0.25)
+    case 3: return expTerm * (t * t * t - 3 * t) * 0.3066; // 1/(sqrt(6)*pi^0.25)
+    case 4: return expTerm * (t * t * t * t - 6 * t * t + 3) * 0.1533;
+    default: return 0;
+  }
+}
+
+/**
+ * QRS complex using Hermite basis expansion
+ * Allows for notched, slurred, and complex QRS morphologies
+ * @param {number} t - time relative to QRS center
+ * @param {number} sigma - time scaling
+ * @param {Array} coeffs - coefficients [c0, c1, c2, c3] for Hermite functions
+ */
+export function hermiteQRS(t, sigma, coeffs) {
+  const tNorm = t / sigma;
+  let result = 0;
+  for (let n = 0; n < coeffs.length && n < 5; n++) {
+    result += coeffs[n] * hermiteFunction(tNorm, n);
+  }
+  return result;
+}
+
+/**
+ * Smooth sigmoid transition function
+ * Useful for ST segment elevation/depression
+ * @param {number} t - time
+ * @param {number} t0 - transition center
+ * @param {number} tau - transition sharpness (smaller = sharper)
+ */
+export function sigmoid(t, t0, tau) {
+  return 0.5 * (1 + Math.tanh((t - t0) / tau));
+}
+
+/**
+ * Biphasic wave - for complex T waves or U waves
+ * @param {number} t - time
+ * @param {number} mu1 - first peak time
+ * @param {number} mu2 - second peak time
+ * @param {number} sigma1 - first peak width
+ * @param {number} sigma2 - second peak width
+ * @param {number} amp1 - first peak amplitude
+ * @param {number} amp2 - second peak amplitude
+ */
+export function biphasicWave(t, mu1, mu2, sigma1, sigma2, amp1, amp2) {
+  return gaussianWave(t, mu1, sigma1, amp1) + gaussianWave(t, mu2, sigma2, amp2);
+}
+
+/**
+ * Time warping function - maps phase φ ∈ [0,1] to actual time within a beat
+ * Allows morphology to stay consistent across different heart rates
+ * @param {number} phi - phase (0 to 1)
+ * @param {number} beatStart - beat start time
+ * @param {number} RR - R-R interval
+ * @param {Object} warpParams - warping parameters
+ */
+export function timeWarp(phi, beatStart, RR, warpParams = {}) {
+  const { stretch = 1.0, shift = 0 } = warpParams;
+  // Simple linear warping with optional stretch/shift
+  return beatStart + (phi * stretch + shift) * RR;
+}
+
+/**
+ * Phase-based wave generator - consistent morphology across HR changes
+ * @param {number} phi - phase within beat (0-1)
+ * @param {number} phiPeak - phase of peak
+ * @param {number} phiWidth - width in phase units
+ * @param {number} amp - amplitude
+ */
+export function phaseWave(phi, phiPeak, phiWidth, amp) {
+  const x = (phi - phiPeak) / phiWidth;
+  return amp * Math.exp(-0.5 * x * x);
+}
+
+// ============================================================================
+// WAVE COMPONENT PRESETS
+// Pre-defined wave shapes for common ECG components
+// ============================================================================
+
+export const WAVE_PRESETS = {
+  // P wave presets (atrial depolarization)
+  P_NORMAL: {
+    type: 'asymmetric',
+    sigmaL: 0.012,
+    sigmaR: 0.016,
+    amp: 0.08,
+    description: 'Normal rounded P wave'
+  },
+  P_PEAKED: {
+    type: 'generalized',
+    sigma: 0.010,
+    p: 3,
+    amp: 0.12,
+    description: 'Peaked P wave (P pulmonale)'
+  },
+  P_BIFID: {
+    type: 'biphasic',
+    mu1Offset: -0.015,
+    mu2Offset: 0.015,
+    sigma1: 0.012,
+    sigma2: 0.012,
+    amp1: 0.06,
+    amp2: 0.07,
+    description: 'Bifid P wave (P mitrale)'
+  },
+
+  // QRS presets
+  QRS_NARROW: {
+    type: 'hermite',
+    sigma: 0.020,
+    coeffs: [0, 0.9, 0.15, 0],
+    description: 'Normal narrow QRS'
+  },
+  QRS_WIDE_RBBB: {
+    type: 'hermite',
+    sigma: 0.035,
+    coeffs: [0, 0.7, 0.3, 0.15],
+    description: 'Wide QRS with RSR\' pattern (RBBB)'
+  },
+  QRS_WIDE_LBBB: {
+    type: 'hermite',
+    sigma: 0.040,
+    coeffs: [0, 0.8, -0.1, 0.2],
+    description: 'Wide QRS with notched pattern (LBBB)'
+  },
+  QRS_DELTA: {
+    type: 'asymmetric',
+    sigmaL: 0.035,
+    sigmaR: 0.015,
+    amp: 0.9,
+    pL: 1.5,
+    description: 'Delta wave (WPW)'
+  },
+
+  // T wave presets
+  T_NORMAL: {
+    type: 'asymmetric',
+    sigmaL: 0.06,
+    sigmaR: 0.10,
+    amp: 0.25,
+    description: 'Normal asymmetric T wave'
+  },
+  T_HYPERACUTE: {
+    type: 'generalized',
+    sigma: 0.08,
+    p: 2.5,
+    amp: 0.45,
+    description: 'Hyperacute peaked T wave'
+  },
+  T_INVERTED: {
+    type: 'asymmetric',
+    sigmaL: 0.06,
+    sigmaR: 0.10,
+    amp: -0.20,
+    description: 'Inverted T wave'
+  },
+  T_BIPHASIC: {
+    type: 'biphasic',
+    mu1Offset: -0.02,
+    mu2Offset: 0.04,
+    sigma1: 0.04,
+    sigma2: 0.06,
+    amp1: -0.08,
+    amp2: 0.18,
+    description: 'Biphasic T wave'
+  }
+};
+
+/**
+ * Apply a wave preset to generate waveform contribution
+ * @param {Float64Array} signal - output signal array
+ * @param {number} fs - sample rate
+ * @param {number} center - center time of wave
+ * @param {Object} preset - wave preset from WAVE_PRESETS
+ * @param {Array} dir - 3D direction vector
+ * @param {number} scale - amplitude scaling factor
+ */
+export function applyWavePreset(Vx, Vy, Vz, fs, center, preset, dir, scale = 1.0) {
+  const n = Vx.length;
+  const { type } = preset;
+
+  // Determine time window
+  let sigma = preset.sigma || preset.sigmaR || 0.05;
+  const window = sigma * 5;
+  const i0 = Math.max(0, Math.floor((center - window) * fs));
+  const i1 = Math.min(n - 1, Math.ceil((center + window) * fs));
+
+  for (let i = i0; i <= i1; i++) {
+    const t = i / fs;
+    let amp = 0;
+
+    switch (type) {
+      case 'asymmetric':
+        amp = asymmetricGaussian(t, center, preset.sigmaL, preset.sigmaR, preset.amp * scale);
+        break;
+      case 'generalized':
+        amp = generalizedGaussian(t, center, preset.sigma, preset.amp * scale, preset.p);
+        break;
+      case 'hermite':
+        amp = hermiteQRS(t - center, preset.sigma, preset.coeffs) * scale;
+        break;
+      case 'biphasic':
+        amp = biphasicWave(
+          t,
+          center + (preset.mu1Offset || 0),
+          center + (preset.mu2Offset || 0),
+          preset.sigma1,
+          preset.sigma2,
+          preset.amp1 * scale,
+          preset.amp2 * scale
+        );
+        break;
+      default:
+        amp = gaussianWave(t, center, sigma, (preset.amp || 1) * scale);
+    }
+
+    Vx[i] += amp * dir[0];
+    Vy[i] += amp * dir[1];
+    Vz[i] += amp * dir[2];
+  }
+}
+
+// ============================================================================
+// HRV (Heart Rate Variability) PARAMETERS
+// Age-dependent parameters for realistic rhythm generation
+// Based on published normative data: Task Force (1996), Umetani (1998)
+// ============================================================================
+
+/**
+ * Get age-appropriate HRV parameters
+ * @param {number} ageY - age in years
+ * @returns {Object} HRV parameters
+ */
+export function getHRVParams(ageY) {
+  // HRV decreases with age - neonates have highest variability
+  // RSA amplitude (HF component) particularly high in children
+
+  if (ageY < 1) {
+    // Neonates/infants: high HRV, strong RSA
+    return {
+      rsaAmp: 0.08,        // RSA amplitude (fraction of RR)
+      rsaFreq: 0.4,        // Respiratory rate ~24 breaths/min
+      lfAmp: 0.04,         // LF component amplitude
+      lfFreq: 0.1,         // LF center frequency
+      vlfAmp: 0.02,        // VLF component
+      rrNoise: 0.015,      // Random beat-to-beat variability
+      lfHfRatio: 0.5,      // Children have lower LF/HF (more parasympathetic)
+    };
+  } else if (ageY < 6) {
+    // Toddlers/preschool
+    return {
+      rsaAmp: 0.06,
+      rsaFreq: 0.35,       // ~21 breaths/min
+      lfAmp: 0.035,
+      lfFreq: 0.1,
+      vlfAmp: 0.018,
+      rrNoise: 0.012,
+      lfHfRatio: 0.6,
+    };
+  } else if (ageY < 12) {
+    // School age
+    return {
+      rsaAmp: 0.045,
+      rsaFreq: 0.28,       // ~17 breaths/min
+      lfAmp: 0.03,
+      lfFreq: 0.1,
+      vlfAmp: 0.015,
+      rrNoise: 0.010,
+      lfHfRatio: 0.8,
+    };
+  } else if (ageY < 18) {
+    // Adolescents
+    return {
+      rsaAmp: 0.035,
+      rsaFreq: 0.25,       // ~15 breaths/min
+      lfAmp: 0.028,
+      lfFreq: 0.1,
+      vlfAmp: 0.012,
+      rrNoise: 0.008,
+      lfHfRatio: 1.0,
+    };
+  } else if (ageY < 40) {
+    // Young adults
+    return {
+      rsaAmp: 0.028,
+      rsaFreq: 0.22,       // ~13 breaths/min
+      lfAmp: 0.025,
+      lfFreq: 0.1,
+      vlfAmp: 0.010,
+      rrNoise: 0.006,
+      lfHfRatio: 1.2,
+    };
+  } else if (ageY < 60) {
+    // Middle-aged adults
+    return {
+      rsaAmp: 0.018,
+      rsaFreq: 0.20,       // ~12 breaths/min
+      lfAmp: 0.020,
+      lfFreq: 0.1,
+      vlfAmp: 0.008,
+      rrNoise: 0.005,
+      lfHfRatio: 1.5,
+    };
+  } else {
+    // Older adults - significantly reduced HRV
+    return {
+      rsaAmp: 0.012,
+      rsaFreq: 0.18,
+      lfAmp: 0.015,
+      lfFreq: 0.1,
+      vlfAmp: 0.006,
+      rrNoise: 0.004,
+      lfHfRatio: 1.8,
+    };
+  }
+}
+
+/**
+ * Generate HRV-modulated RR interval
+ * Implements: RR(t) = RR0 * (1 + A_rsa*sin(2π*f_rsa*t + φ_rsa) + A_lf*sin(2π*f_lf*t + φ_lf) + A_vlf*sin(2π*f_vlf*t + φ_vlf)) + ε
+ * @param {number} RR0 - base RR interval
+ * @param {number} t - current time
+ * @param {Object} hrvParams - HRV parameters
+ * @param {Object} phases - phase offsets for each component
+ * @param {Function} rng - random number generator
+ * @returns {number} modulated RR interval
+ */
+export function modulateRR(RR0, t, hrvParams, phases, rng) {
+  // RSA (High Frequency) - respiratory-driven
+  const rsaMod = hrvParams.rsaAmp * Math.sin(2 * Math.PI * hrvParams.rsaFreq * t + phases.rsa);
+
+  // LF component - sympathetic + baroreflex
+  const lfMod = hrvParams.lfAmp * Math.sin(2 * Math.PI * hrvParams.lfFreq * t + phases.lf);
+
+  // VLF component - thermoregulation, hormonal
+  const vlfMod = hrvParams.vlfAmp * Math.sin(2 * Math.PI * 0.03 * t + phases.vlf);
+
+  // Random beat-to-beat noise
+  const noise = randn(rng) * hrvParams.rrNoise;
+
+  // Combined modulation
+  const modulation = 1.0 + rsaMod + lfMod + vlfMod;
+
+  return RR0 * modulation + noise;
+}
+
+// ============================================================================
+// ARRHYTHMIA STATE MACHINE
+// Markov-based model for realistic ectopy timing
+// ============================================================================
+
+/**
+ * State machine for ectopic beat generation
+ * Models PAC/PVC occurrence with realistic clustering
+ */
+export class EctopyStateMachine {
+  constructor(rng, ectopyType, baseRate = 0.1) {
+    this.rng = rng;
+    this.ectopyType = ectopyType; // 'PAC', 'PVC', or 'none'
+    this.baseRate = baseRate;     // Base probability per beat
+
+    // State: 'normal', 'ectopic', 'refractory'
+    this.state = 'normal';
+    this.refractoryBeats = 0;
+
+    // Clustering parameters (ectopics tend to cluster)
+    this.clusterProb = 0.3;       // Probability of another ectopic after one
+    this.minRefractoryBeats = 2;  // Minimum beats after ectopic before another
+  }
+
+  /**
+   * Determine if next beat should be ectopic
+   * @param {number} beatIndex - current beat number
+   * @returns {Object} { isEctopic, couplingInterval }
+   */
+  nextBeat(beatIndex) {
+    if (this.ectopyType === 'none') {
+      return { isEctopic: false, couplingInterval: 1.0 };
+    }
+
+    // Handle refractory period after ectopic
+    if (this.state === 'refractory') {
+      this.refractoryBeats--;
+      if (this.refractoryBeats <= 0) {
+        this.state = 'normal';
+      }
+      return { isEctopic: false, couplingInterval: 1.0 };
+    }
+
+    // Determine if this beat is ectopic
+    let prob = this.baseRate;
+
+    // Higher probability if previous beat was ectopic (clustering)
+    if (this.state === 'ectopic') {
+      prob = this.clusterProb;
+    }
+
+    // Occasional bursts more likely in middle of recording
+    if (beatIndex > 5 && beatIndex % 7 === 0) {
+      prob *= 1.5;
+    }
+
+    const isEctopic = this.rng() < prob;
+
+    if (isEctopic) {
+      // Coupling interval: 0.5-0.8 of normal RR for premature beats
+      const couplingInterval = 0.5 + this.rng() * 0.3;
+
+      // Set up refractory period after this ectopic
+      this.refractoryBeats = this.minRefractoryBeats + Math.floor(this.rng() * 3);
+      this.state = 'refractory';
+
+      return { isEctopic: true, couplingInterval };
+    }
+
+    this.state = 'normal';
+    return { isEctopic: false, couplingInterval: 1.0 };
+  }
+}
+
+// ============================================================================
 // MODULE 1: RHYTHM MODEL
 // Generates beat schedule based on rhythm type and heart rate
 // Input: params, seed
 // Output: beatSchedule array of { pTime, qrsTime, hasPWave, hasQRS, isPVC, prInterval }
 // ============================================================================
 
-export function rhythmModel(params, dx, duration, seed) {
+export function rhythmModel(params, dx, duration, seed, ageY = 30) {
   const rng = mulberry32(Math.max(1, Math.floor(seed)));
-  const RR = 60 / params.HR;
+  const RR0 = 60 / params.HR;
 
-  // Generate P wave times (atrial rhythm)
+  // Get age-appropriate HRV parameters
+  const hrvParams = getHRVParams(ageY);
+
+  // Disable HRV for certain rhythms
+  const disableHRV = dx.includes("flutter") || dx.includes("SVT") || dx.includes("AVB");
+  const effectiveHRV = disableHRV ? {
+    rsaAmp: 0, rsaFreq: hrvParams.rsaFreq,
+    lfAmp: 0, lfFreq: hrvParams.lfFreq,
+    vlfAmp: 0, rrNoise: 0,
+  } : hrvParams;
+
+  // Random phase offsets for HRV components
+  const phases = {
+    rsa: rng() * 2 * Math.PI,
+    lf: rng() * 2 * Math.PI,
+    vlf: rng() * 2 * Math.PI,
+  };
+
+  // Generate P wave times (atrial rhythm) with realistic HRV
   const pWaveTimes = [];
+  const rrIntervals = [];
   let tt = 0.6;
-  const rrJit = dx.includes("flutter") || dx.includes("SVT") || dx.includes("AVB") ? 0.0 : 0.006;
 
   while (tt < duration - 0.8) {
     pWaveTimes.push(tt);
-    const rsa = dx.includes("flutter") || dx.includes("SVT") ? 0 : 0.018 * Math.sin(2 * Math.PI * 0.22 * tt);
-    const rr = RR * (1.0 + rsa) + randn(rng) * rrJit;
+    const rr = modulateRR(RR0, tt, effectiveHRV, phases, rng);
+    rrIntervals.push(rr);
     tt += clamp(rr, 0.35, 1.2);
   }
 
@@ -98,22 +614,32 @@ export function rhythmModel(params, dx, duration, seed) {
       beatCount++;
     }
   } else if (dx === "PACs") {
-    // Normal rhythm with occasional early P waves
+    // Normal rhythm with occasional early P waves using state machine
+    const pacStateMachine = new EctopyStateMachine(rng, 'PAC', 0.15);
     for (let i = 0; i < pWaveTimes.length; i++) {
       const pT = pWaveTimes[i];
       beats.push({ pTime: pT, qrsTime: pT + params.PR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: params.PR });
-      if (i > 0 && i % 5 === 3 && pT + RR * 0.65 < duration - 0.5) {
-        const pacTime = pT + RR * 0.65;
-        beats.push({ pTime: pacTime, qrsTime: pacTime + params.PR * 0.9, hasPWave: true, hasQRS: true, isPVC: false, prInterval: params.PR * 0.9 });
+
+      // Check if a PAC should occur after this beat
+      const { isEctopic, couplingInterval } = pacStateMachine.nextBeat(i);
+      if (isEctopic && pT + RR0 * couplingInterval < duration - 0.5) {
+        const pacTime = pT + RR0 * couplingInterval;
+        // PACs have shorter PR interval due to early activation
+        const pacPR = params.PR * (0.85 + rng() * 0.1);
+        beats.push({ pTime: pacTime, qrsTime: pacTime + pacPR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: pacPR, isPAC: true });
       }
     }
   } else if (dx === "PVCs") {
-    // Normal rhythm with occasional PVCs
+    // Normal rhythm with occasional PVCs using state machine
+    const pvcStateMachine = new EctopyStateMachine(rng, 'PVC', 0.12);
     for (let i = 0; i < pWaveTimes.length; i++) {
       const pT = pWaveTimes[i];
       beats.push({ pTime: pT, qrsTime: pT + params.PR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: params.PR });
-      if (i > 0 && i % 4 === 2 && pT + RR * 0.7 < duration - 0.5) {
-        const pvcTime = pT + RR * 0.7;
+
+      // Check if a PVC should occur after this beat
+      const { isEctopic, couplingInterval } = pvcStateMachine.nextBeat(i);
+      if (isEctopic && pT + RR0 * couplingInterval < duration - 0.5) {
+        const pvcTime = pT + RR0 * couplingInterval;
         beats.push({ pTime: null, qrsTime: pvcTime, hasPWave: false, hasQRS: true, isPVC: true, prInterval: null });
       }
     }
@@ -125,10 +651,54 @@ export function rhythmModel(params, dx, duration, seed) {
     }
   }
 
+  // Compute HRV metrics from generated RR intervals
+  const hrvMetrics = computeHRVMetrics(rrIntervals);
+
   return {
     beats,
-    RR,
+    RR: RR0,
     pWaveTimes,
+    rrIntervals,
+    hrvParams: effectiveHRV,
+    hrvMetrics,
+  };
+}
+
+/**
+ * Compute time-domain HRV metrics from RR intervals
+ * @param {Array} rrIntervals - array of RR intervals in seconds
+ * @returns {Object} HRV metrics
+ */
+export function computeHRVMetrics(rrIntervals) {
+  if (!rrIntervals || rrIntervals.length < 3) {
+    return { SDNN: 0, RMSSD: 0, pNN50: 0, meanRR: 0 };
+  }
+
+  // Mean RR
+  const meanRR = rrIntervals.reduce((a, b) => a + b, 0) / rrIntervals.length;
+
+  // SDNN - standard deviation of NN intervals
+  const variance = rrIntervals.reduce((sum, rr) => sum + Math.pow(rr - meanRR, 2), 0) / rrIntervals.length;
+  const SDNN = Math.sqrt(variance) * 1000; // Convert to ms
+
+  // RMSSD - root mean square of successive differences
+  let sumSqDiff = 0;
+  let nn50Count = 0;
+  for (let i = 1; i < rrIntervals.length; i++) {
+    const diff = (rrIntervals[i] - rrIntervals[i - 1]) * 1000; // ms
+    sumSqDiff += diff * diff;
+    if (Math.abs(diff) > 50) nn50Count++;
+  }
+  const RMSSD = Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
+
+  // pNN50 - percentage of successive differences > 50ms
+  const pNN50 = (nn50Count / (rrIntervals.length - 1)) * 100;
+
+  return {
+    meanRR: meanRR * 1000,  // ms
+    SDNN,                    // ms
+    RMSSD,                   // ms
+    pNN50,                   // percentage
   };
 }
 
@@ -558,8 +1128,8 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
   const RR = 60 / params.HR;
   const QT = params.QTc * Math.sqrt(RR);
 
-  // Module 1: Rhythm
-  const beatSchedule = rhythmModel(params, dx, duration, seed);
+  // Module 1: Rhythm (with age-appropriate HRV)
+  const beatSchedule = rhythmModel(params, dx, duration, seed, ageY);
 
   // Module 2: Morphology
   const vcg = morphologyModel(beatSchedule, params, dx, fs, N, seed);
@@ -600,7 +1170,7 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     duration_s: duration,
     targets: {
       synthetic: true,
-      generator_version: "2.0.0-modular",
+      generator_version: "2.1.0-hrv",
       age_years: ageY,
       dx,
       HR_bpm: params.HR,
@@ -609,6 +1179,7 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
       QT_ms: Math.round(QT * 1000),
       QTc_ms: Math.round(params.QTc * 1000),
       axes_deg: { P: params.Paxis, QRS: params.QRSaxis, T: params.Taxis },
+      hrv: beatSchedule.hrvMetrics,
     },
     leads_uV,
   };

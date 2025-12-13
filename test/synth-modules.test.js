@@ -16,6 +16,22 @@ import {
   axisDir,
   mulberry32,
   randn,
+  // Wave basis toolkit (Step 2)
+  gaussianWave,
+  asymmetricGaussian,
+  generalizedGaussian,
+  hermiteFunction,
+  hermiteQRS,
+  biphasicWave,
+  sigmoid,
+  phaseWave,
+  WAVE_PRESETS,
+  applyWavePreset,
+  // HRV toolkit (Step 3)
+  getHRVParams,
+  modulateRR,
+  computeHRVMetrics,
+  EctopyStateMachine,
 } from "../viewer/js/ecg-synth-modules.js";
 import { ageDefaults, applyDx, DIAGNOSES } from "../viewer/js/ecg-synth.js";
 import { normalizeECGData, detectRPeaks, physicsChecks } from "../viewer/js/ecg-core.js";
@@ -56,43 +72,203 @@ async function run() {
     console.log("  RNG determinism: OK");
   }
 
+  // Test Wave Basis Toolkit (Step 2)
+  console.log("\nTest 1b: Wave Basis Toolkit");
+  {
+    // Test standard Gaussian
+    const gPeak = gaussianWave(0.5, 0.5, 0.1, 1.0);
+    approx(gPeak, 1.0, 0.001, "Gaussian peak");
+    const gTail = gaussianWave(1.0, 0.5, 0.1, 1.0);
+    assert.ok(gTail < 0.001, "Gaussian tail should be near zero");
+    console.log("  gaussianWave(): OK");
+
+    // Test asymmetric Gaussian
+    const agLeft = asymmetricGaussian(0.4, 0.5, 0.05, 0.1, 1.0);
+    const agRight = asymmetricGaussian(0.6, 0.5, 0.05, 0.1, 1.0);
+    assert.ok(agLeft < agRight, "Asymmetric Gaussian: narrower left sigma = steeper rise");
+    console.log("  asymmetricGaussian(): OK");
+
+    // Test generalized Gaussian (shape parameter)
+    const ggSharp = generalizedGaussian(0.45, 0.5, 0.1, 1.0, 1.5); // sharper
+    const ggNormal = generalizedGaussian(0.45, 0.5, 0.1, 1.0, 2.0); // standard
+    const ggFlat = generalizedGaussian(0.45, 0.5, 0.1, 1.0, 3.0); // flatter
+    assert.ok(ggSharp < ggNormal, "Lower p = sharper drop");
+    assert.ok(ggNormal < ggFlat, "Higher p = flatter top");
+    console.log("  generalizedGaussian(): OK");
+
+    // Test Hermite functions
+    const h0 = hermiteFunction(0, 0);
+    const h1_at_0 = hermiteFunction(0, 1);
+    const h1_at_1 = hermiteFunction(1, 1);
+    assert.ok(h0 > 0, "H0 at center should be positive");
+    approx(h1_at_0, 0, 0.001, "H1 at center should be zero (odd function)");
+    assert.ok(h1_at_1 > 0, "H1 at t=1 should be positive");
+    console.log("  hermiteFunction(): OK");
+
+    // Test Hermite QRS
+    const qrs = hermiteQRS(0, 0.02, [0, 1, 0.2, 0]);
+    assert.ok(Number.isFinite(qrs), "Hermite QRS should produce finite value");
+    console.log("  hermiteQRS(): OK");
+
+    // Test biphasic wave
+    const bp = biphasicWave(0.5, 0.4, 0.6, 0.05, 0.05, -0.5, 0.5);
+    assert.ok(Number.isFinite(bp), "Biphasic wave should produce finite value");
+    console.log("  biphasicWave(): OK");
+
+    // Test sigmoid
+    const sigLow = sigmoid(0.4, 0.5, 0.01);
+    const sigMid = sigmoid(0.5, 0.5, 0.01);
+    const sigHigh = sigmoid(0.6, 0.5, 0.01);
+    assert.ok(sigLow < 0.1, "Sigmoid before transition should be low");
+    approx(sigMid, 0.5, 0.01, "Sigmoid at center should be 0.5");
+    assert.ok(sigHigh > 0.9, "Sigmoid after transition should be high");
+    console.log("  sigmoid(): OK");
+
+    // Test phase wave
+    const pw = phaseWave(0.5, 0.5, 0.1, 1.0);
+    approx(pw, 1.0, 0.001, "Phase wave at peak");
+    console.log("  phaseWave(): OK");
+
+    // Test wave presets exist
+    assert.ok(WAVE_PRESETS.P_NORMAL, "P_NORMAL preset should exist");
+    assert.ok(WAVE_PRESETS.QRS_NARROW, "QRS_NARROW preset should exist");
+    assert.ok(WAVE_PRESETS.T_NORMAL, "T_NORMAL preset should exist");
+    console.log("  WAVE_PRESETS: OK");
+
+    // Test applyWavePreset
+    const Vx = new Float64Array(1000);
+    const Vy = new Float64Array(1000);
+    const Vz = new Float64Array(1000);
+    applyWavePreset(Vx, Vy, Vz, 1000, 0.5, WAVE_PRESETS.P_NORMAL, [1, 0, 0], 1.0);
+    const maxVx = Math.max(...Vx);
+    assert.ok(maxVx > 0, "applyWavePreset should add to signal");
+    console.log("  applyWavePreset(): OK");
+  }
+
+  // Test HRV Toolkit (Step 3)
+  console.log("\nTest 1c: HRV Toolkit");
+  {
+    // Test getHRVParams for different ages
+    const hrvNeonate = getHRVParams(0.5);
+    const hrvChild = getHRVParams(8);
+    const hrvAdult = getHRVParams(35);
+    const hrvElderly = getHRVParams(70);
+
+    // Neonates should have highest RSA amplitude
+    assert.ok(hrvNeonate.rsaAmp > hrvChild.rsaAmp, "Neonate RSA > Child RSA");
+    assert.ok(hrvChild.rsaAmp > hrvAdult.rsaAmp, "Child RSA > Adult RSA");
+    assert.ok(hrvAdult.rsaAmp > hrvElderly.rsaAmp, "Adult RSA > Elderly RSA");
+    console.log("  getHRVParams() age scaling: OK");
+
+    // Respiratory frequency should be higher in younger patients
+    assert.ok(hrvNeonate.rsaFreq > hrvChild.rsaFreq, "Neonate resp rate > Child");
+    assert.ok(hrvChild.rsaFreq > hrvAdult.rsaFreq, "Child resp rate > Adult");
+    console.log("  getHRVParams() respiratory scaling: OK");
+
+    // Test modulateRR
+    const rng = mulberry32(12345);
+    const phases = { rsa: 0, lf: Math.PI / 2, vlf: Math.PI };
+    const RR0 = 0.8; // 75 bpm
+
+    // Generate several RR intervals
+    const rrIntervals = [];
+    for (let t = 0; t < 10; t += 0.8) {
+      const rr = modulateRR(RR0, t, hrvAdult, phases, rng);
+      rrIntervals.push(rr);
+      assert.ok(rr > 0.3 && rr < 1.5, `RR ${rr} should be in physiological range`);
+    }
+    console.log("  modulateRR(): OK");
+
+    // Test that RR intervals vary (HRV exists)
+    const rrMean = rrIntervals.reduce((a, b) => a + b, 0) / rrIntervals.length;
+    const rrVariance = rrIntervals.reduce((sum, rr) => sum + Math.pow(rr - rrMean, 2), 0) / rrIntervals.length;
+    assert.ok(rrVariance > 0.0001, "RR intervals should have variance (HRV)");
+    console.log(`  RR variability: mean=${rrMean.toFixed(3)}, variance=${rrVariance.toFixed(6)}`);
+
+    // Test computeHRVMetrics
+    const hrvMetrics = computeHRVMetrics(rrIntervals);
+    assert.ok(hrvMetrics.meanRR > 0, "meanRR should be positive");
+    assert.ok(hrvMetrics.SDNN >= 0, "SDNN should be non-negative");
+    assert.ok(hrvMetrics.RMSSD >= 0, "RMSSD should be non-negative");
+    assert.ok(hrvMetrics.pNN50 >= 0 && hrvMetrics.pNN50 <= 100, "pNN50 should be 0-100%");
+    console.log(`  computeHRVMetrics(): SDNN=${hrvMetrics.SDNN.toFixed(1)}ms, RMSSD=${hrvMetrics.RMSSD.toFixed(1)}ms`);
+
+    // Test EctopyStateMachine
+    const ectopyRng = mulberry32(54321);
+    const pvcMachine = new EctopyStateMachine(ectopyRng, 'PVC', 0.15);
+    let ectopicCount = 0;
+    for (let i = 0; i < 50; i++) {
+      const { isEctopic, couplingInterval } = pvcMachine.nextBeat(i);
+      if (isEctopic) {
+        ectopicCount++;
+        assert.ok(couplingInterval >= 0.5 && couplingInterval <= 0.8, "Coupling interval in range");
+      }
+    }
+    assert.ok(ectopicCount > 0, "Should generate some ectopic beats");
+    assert.ok(ectopicCount < 25, "Should not generate too many ectopic beats");
+    console.log(`  EctopyStateMachine: ${ectopicCount}/50 ectopic beats`);
+
+    // Test 'none' ectopy type
+    const noEctopy = new EctopyStateMachine(ectopyRng, 'none', 0.15);
+    let noEctopyCount = 0;
+    for (let i = 0; i < 20; i++) {
+      if (noEctopy.nextBeat(i).isEctopic) noEctopyCount++;
+    }
+    assert.strictEqual(noEctopyCount, 0, "No ectopy when type is 'none'");
+    console.log("  EctopyStateMachine 'none' mode: OK");
+  }
+
   // Test Module 1: Rhythm Model
   console.log("\nTest 2: Module 1 - Rhythm Model");
   {
     const params = applyDx(ageDefaults(8), "Normal sinus");
-    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42);
+    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42, 8);
 
     assert.ok(beatSchedule.beats.length > 0, "Should generate beats");
     assert.ok(beatSchedule.RR > 0, "Should have RR interval");
     assert.ok(beatSchedule.pWaveTimes.length > 0, "Should have P wave times");
+    assert.ok(beatSchedule.rrIntervals.length > 0, "Should have RR intervals array");
+    assert.ok(beatSchedule.hrvParams, "Should have HRV params");
+    assert.ok(beatSchedule.hrvMetrics, "Should have HRV metrics");
+
+    // Verify HRV metrics are computed
+    assert.ok(beatSchedule.hrvMetrics.SDNN > 0, "SDNN should be positive for normal sinus");
+    console.log(`  HRV metrics: SDNN=${beatSchedule.hrvMetrics.SDNN.toFixed(1)}ms, RMSSD=${beatSchedule.hrvMetrics.RMSSD.toFixed(1)}ms`);
 
     // All normal beats should have P wave and QRS
     const normalBeats = beatSchedule.beats.filter(b => b.hasPWave && b.hasQRS);
     assert.ok(normalBeats.length > 0, "Should have normal beats");
     console.log(`  Normal sinus: ${beatSchedule.beats.length} beats, RR=${beatSchedule.RR.toFixed(3)}s`);
 
-    // Test 3rd degree AVB - should have separate P waves and QRS
+    // Test 3rd degree AVB - should have separate P waves and QRS (no HRV due to complete block)
     const avb3Params = applyDx(ageDefaults(8), "3rd degree AVB");
-    const avb3Schedule = rhythmModel(avb3Params, "3rd degree AVB", duration, 42);
+    const avb3Schedule = rhythmModel(avb3Params, "3rd degree AVB", duration, 42, 8);
     const pOnly = avb3Schedule.beats.filter(b => b.hasPWave && !b.hasQRS);
     const qrsOnly = avb3Schedule.beats.filter(b => !b.hasPWave && b.hasQRS);
     assert.ok(pOnly.length > 0, "3rd degree AVB should have P-only beats");
     assert.ok(qrsOnly.length > 0, "3rd degree AVB should have QRS-only beats");
     console.log(`  3rd degree AVB: ${pOnly.length} P-only, ${qrsOnly.length} QRS-only`);
 
-    // Test PVCs - should have beats marked as PVC
+    // Test PVCs - should have beats marked as PVC (using state machine)
     const pvcParams = applyDx(ageDefaults(8), "PVCs");
-    const pvcSchedule = rhythmModel(pvcParams, "PVCs", duration, 42);
+    const pvcSchedule = rhythmModel(pvcParams, "PVCs", duration, 42, 8);
     const pvcs = pvcSchedule.beats.filter(b => b.isPVC);
     assert.ok(pvcs.length > 0, "PVCs should have PVC beats");
     console.log(`  PVCs: ${pvcs.length} PVC beats`);
+
+    // Test PACs - should have early beats with shortened coupling
+    const pacParams = applyDx(ageDefaults(8), "PACs");
+    const pacSchedule = rhythmModel(pacParams, "PACs", duration, 42, 8);
+    const pacs = pacSchedule.beats.filter(b => b.isPAC);
+    assert.ok(pacs.length > 0, "PACs should have PAC beats");
+    console.log(`  PACs: ${pacs.length} PAC beats`);
   }
 
   // Test Module 2: Morphology Model
   console.log("\nTest 3: Module 2 - Morphology Model");
   {
     const params = applyDx(ageDefaults(8), "Normal sinus");
-    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42);
+    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42, 8);
     const vcg = morphologyModel(beatSchedule, params, "Normal sinus", fs, N, 42);
 
     assert.ok(vcg.Vx instanceof Float64Array, "Vx should be Float64Array");
@@ -113,7 +289,7 @@ async function run() {
   console.log("\nTest 4: Module 3 - Lead Field Model");
   {
     const params = applyDx(ageDefaults(8), "Normal sinus");
-    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42);
+    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42, 8);
     const vcg = morphologyModel(beatSchedule, params, "Normal sinus", fs, N, 42);
     const phi = leadFieldModel(vcg);
 
@@ -141,7 +317,7 @@ async function run() {
   console.log("\nTest 5: Module 4 - Derive Leads");
   {
     const params = applyDx(ageDefaults(8), "Normal sinus");
-    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42);
+    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42, 8);
     const vcg = morphologyModel(beatSchedule, params, "Normal sinus", fs, N, 42);
     const phi = leadFieldModel(vcg);
     const leads = deriveLeads(phi);
@@ -168,7 +344,7 @@ async function run() {
   console.log("\nTest 6: Module 5 - Device and Artifact Model");
   {
     const params = applyDx(ageDefaults(8), "Normal sinus");
-    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42);
+    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42, 8);
     const vcg = morphologyModel(beatSchedule, params, "Normal sinus", fs, N, 42);
     const phi = leadFieldModel(vcg);
 
@@ -196,6 +372,13 @@ async function run() {
     assert.strictEqual(ecg.duration_s, 10.0, "Duration should be 10s");
     assert.ok(ecg.targets.synthetic === true, "Should be marked synthetic");
     assert.ok(ecg.targets.generator_version, "Should have generator version");
+    assert.ok(ecg.targets.generator_version.includes("hrv"), "Generator version should include 'hrv'");
+
+    // Verify HRV metrics are included in output
+    assert.ok(ecg.targets.hrv, "Should include HRV metrics in targets");
+    assert.ok(ecg.targets.hrv.SDNN >= 0, "SDNN should be present and non-negative");
+    assert.ok(ecg.targets.hrv.RMSSD >= 0, "RMSSD should be present and non-negative");
+    console.log(`  HRV in output: SDNN=${ecg.targets.hrv.SDNN.toFixed(1)}ms, RMSSD=${ecg.targets.hrv.RMSSD.toFixed(1)}ms`);
 
     // Verify with analysis pipeline
     const meta = normalizeECGData(ecg);
