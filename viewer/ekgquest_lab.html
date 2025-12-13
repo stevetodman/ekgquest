@@ -1270,6 +1270,16 @@ document.getElementById('imageInput').addEventListener('change', async (e) => {
 });
 
 window.clearUploadedImage = function() {
+  // Securely clear image data
+  if (uploadedImage) {
+    // Revoke any blob URLs
+    if (uploadedImage.src && uploadedImage.src.startsWith('blob:')) {
+      URL.revokeObjectURL(uploadedImage.src);
+    }
+    // Clear image source
+    uploadedImage.src = '';
+  }
+
   uploadedImage = null;
   uploadedImageName = null;
   imageMode = false;
@@ -1281,7 +1291,7 @@ window.clearUploadedImage = function() {
   document.getElementById('caseInfo').textContent = 'No case loaded';
   clearAllCalipers();
   redraw();
-  showStatus('Image cleared', 'info', 2000);
+  showStatus('Image cleared and purged from memory', 'info', 2000);
 };
 
 // Load ECG from clipboard (direct paste or clipboard watcher)
@@ -1453,30 +1463,194 @@ function loadDroppedImage(file) {
   img.src = URL.createObjectURL(file);
 }
 
+// Sanitize image: strip all EXIF/metadata, normalize size, enhance if needed
+function sanitizeImage(img, callback) {
+  // Create canvas to strip all metadata (EXIF, GPS, device info, etc.)
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // Normalize size: too large images slow processing, too small lose detail
+  const MAX_WIDTH = 4000;
+  const MAX_HEIGHT = 3000;
+  const MIN_WIDTH = 400;
+
+  let width = img.width;
+  let height = img.height;
+
+  // Scale down if too large
+  if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+    const scale = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  // Warn if too small
+  if (width < MIN_WIDTH) {
+    console.warn('Image may be too small for accurate digitization');
+  }
+
+  canvas.width = width;
+  canvas.height = height;
+
+  // Draw image to canvas - this strips all metadata
+  ctx.drawImage(img, 0, 0, width, height);
+
+  // Check if image needs contrast enhancement
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  // Calculate contrast (difference between dark and light areas)
+  let minBright = 255, maxBright = 0;
+  for (let i = 0; i < data.length; i += 16) { // Sample every 4th pixel
+    const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
+    if (brightness < minBright) minBright = brightness;
+    if (brightness > maxBright) maxBright = brightness;
+  }
+
+  const contrast = maxBright - minBright;
+
+  // Enhance contrast if image is faint (low contrast)
+  if (contrast < 100) {
+    const scale = 200 / Math.max(contrast, 1);
+    const offset = -minBright * scale;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = Math.min(255, Math.max(0, data[i] * scale + offset));
+      data[i+1] = Math.min(255, Math.max(0, data[i+1] * scale + offset));
+      data[i+2] = Math.min(255, Math.max(0, data[i+2] * scale + offset));
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  // Revoke original object URL if it exists (free memory, remove reference)
+  if (img.src && img.src.startsWith('blob:')) {
+    URL.revokeObjectURL(img.src);
+  }
+
+  // Create new clean image from canvas pixels only
+  canvas.toBlob((blob) => {
+    const cleanImg = new Image();
+    cleanImg.onload = function() {
+      // Revoke the temporary blob URL after loading
+      URL.revokeObjectURL(cleanImg.src);
+      callback(cleanImg);
+    };
+    cleanImg.src = URL.createObjectURL(blob);
+  }, 'image/png'); // Always output as PNG (no EXIF support)
+}
+
+// Sanitize filename: remove path, timestamps, device identifiers
+function sanitizeFilename(name) {
+  if (!name) return 'ecg_import.png';
+
+  // Remove path components
+  let clean = name.split(/[/\\]/).pop();
+
+  // Remove common identifying patterns
+  clean = clean
+    .replace(/IMG_\d+/gi, 'ecg')           // iPhone IMG_1234
+    .replace(/DSC_?\d+/gi, 'ecg')          // Camera DSC_1234
+    .replace(/\d{4}-\d{2}-\d{2}/g, '')     // Dates 2024-01-15
+    .replace(/\d{8}_\d{6}/g, '')           // Timestamps 20240115_143022
+    .replace(/screenshot/gi, 'ecg')         // Screenshots
+    .replace(/photo/gi, 'ecg')              // Photos
+    .replace(/_+/g, '_')                    // Multiple underscores
+    .replace(/^_|_$/g, '')                  // Leading/trailing underscores
+    .replace(/\s+/g, '_');                  // Spaces to underscores
+
+  // Ensure it has a valid extension
+  if (!clean.match(/\.(png|jpg|jpeg)$/i)) {
+    clean = clean.replace(/\.[^.]*$/, '') + '.png';
+  }
+
+  return clean || 'ecg_import.png';
+}
+
 // Central function to process any imported image
 function processImportedImage(img, name) {
-  uploadedImage = img;
-  uploadedImageName = name || 'imported.png';
+  showStatus('Sanitizing image (removing metadata)...', 'info', 0);
 
-  // Try auto-calibration
-  const detected = detectGridSpacing(img);
-  if (detected && detected.confidence > 0.6) {
-    imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto' };
+  // Sanitize the image first - strips all EXIF/metadata
+  sanitizeImage(img, (cleanImg) => {
+    // Store only the sanitized version
+    uploadedImage = cleanImg;
+    uploadedImageName = sanitizeFilename(name);
 
-    // Auto-digitize if calibration succeeded
-    showStatus('Digitizing ECG...', 'info', 0);
-    setTimeout(() => {
-      autoDigitizeImage(img, imageCalibration);
-    }, 50);
-  } else {
-    // Fall back to image mode without digitization
-    imageMode = true;
-    imageCalibration = null;
-    document.getElementById('calibrationControls').style.display = 'block';
-    document.getElementById('caseInfo').textContent = uploadedImageName;
-    showStatus('ECG loaded - click "Digitize" after calibrating for full features', 'info');
-    redraw();
-  }
+    // Clear reference to original image
+    img.src = '';
+    img = null;
+
+    // Try auto-calibration
+    const detected = detectGridSpacing(cleanImg);
+    if (detected && detected.confidence > 0.6) {
+      imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto' };
+
+      // Auto-digitize if calibration succeeded
+      showStatus('Digitizing ECG...', 'info', 0);
+      setTimeout(() => {
+        autoDigitizeImage(cleanImg, imageCalibration);
+      }, 50);
+    } else if (detected && detected.confidence > 0.3) {
+      // Medium confidence - try with detected value but warn user
+      imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-uncertain' };
+      showStatus('Attempting digitization (uncertain grid detection)...', 'info', 0);
+      setTimeout(() => {
+        autoDigitizeImage(cleanImg, imageCalibration);
+      }, 50);
+    } else {
+      // Low confidence - try common ECG paper sizes as fallback
+      // Standard ECG paper: 25mm/s, 10mm/mV, common DPIs: 72, 96, 150, 300
+      const fallbackCalibrations = [
+        { pxPerMm: 300/25.4, desc: '300 DPI' },  // ~11.8 px/mm
+        { pxPerMm: 150/25.4, desc: '150 DPI' },  // ~5.9 px/mm
+        { pxPerMm: 96/25.4, desc: '96 DPI' },    // ~3.8 px/mm
+        { pxPerMm: cleanImg.width / 250, desc: 'width-based' } // Assume 10 seconds = 250mm
+      ];
+
+      // Try each fallback and pick the one that produces the best trace
+      let bestResult = null;
+      let bestScore = 0;
+
+      for (const fallback of fallbackCalibrations) {
+        try {
+          const testCalibration = { pxPerMm: fallback.pxPerMm, method: 'fallback-' + fallback.desc };
+          const extracted = extractWaveformFromImage(cleanImg, testCalibration);
+
+          if (extracted && Object.keys(extracted.leads_uV).length > 0) {
+            const mainLead = extracted.leads_uV['II'] || Object.values(extracted.leads_uV)[0];
+            if (mainLead && mainLead.length > 100) {
+              // Score based on signal characteristics
+              const range = Math.max(...mainLead) - Math.min(...mainLead);
+              const score = (range > 200 && range < 10000) ? range : 0;
+
+              if (score > bestScore) {
+                bestScore = score;
+                bestResult = { calibration: testCalibration, extracted };
+              }
+            }
+          }
+        } catch (e) {
+          // Continue trying other fallbacks
+        }
+      }
+
+      if (bestResult && bestScore > 300) {
+        // Use the best fallback result
+        imageCalibration = bestResult.calibration;
+        showStatus('Auto-calibrating with fallback strategy...', 'info', 0);
+        setTimeout(() => {
+          autoDigitizeImage(cleanImg, imageCalibration);
+        }, 50);
+      } else {
+        // No good fallback - go to manual mode
+        imageMode = true;
+        imageCalibration = null;
+        document.getElementById('calibrationControls').style.display = 'block';
+        document.getElementById('caseInfo').textContent = uploadedImageName;
+        showStatus('Manual calibration needed - click two grid points 5mm apart', 'info');
+        redraw();
+      }
+    }
+  });
 }
 
 // Auto-digitize image to waveform data
@@ -1496,7 +1670,7 @@ function autoDigitizeImage(img, calibration) {
     // Fill in missing leads
     const leads = fillMissingLeads(extracted.leads_uV);
 
-    // Create full ECG data structure
+    // Create full ECG data structure (no traceable metadata)
     ecgData = {
       schema_version: '1.0',
       fs: extracted.fs,
@@ -1505,10 +1679,9 @@ function autoDigitizeImage(img, calibration) {
       targets: {
         synthetic: false,
         imported: true,
-        source: 'image',
-        filename: uploadedImageName,
-        dx: 'Imported ECG',
-        import_time: new Date().toISOString()
+        source: 'digitized',
+        dx: 'Imported ECG'
+        // Note: No filename, timestamps, or other traceable data stored
       },
       integrity: {
         format: 'auto_digitized',
