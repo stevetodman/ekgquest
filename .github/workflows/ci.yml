@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run tests
+        run: npm test
+
+  lint-html:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check HTML files exist
+        run: |
+          test -f viewer/ecg_viewer_unified.html
+          test -f viewer/ecg_synth_viewer_age_dx_worldclass_medianbeat.html
+          echo "HTML files verified"
+
+      - name: Check JS modules exist
+        run: |
+          test -f viewer/js/ecg-core.js
+          test -f viewer/js/ecg-synth.js
+          test -f viewer/js/ecg-worker.js
+          echo "JS modules verified"

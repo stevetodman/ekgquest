@@ -74,10 +74,27 @@
   .mh-title{font-weight:700;font-size:16px}
   .mh-field{font-size:12px;color:var(--muted)}
   .missing-lead{color:#b00020;}
+  .quiz-input input{
+    width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;
+    font-size:14px;margin-top:4px;
+  }
+  .quiz-input input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .grade-result{font-size:12px;margin-top:4px;min-height:16px}
+  .grade-result.correct{color:var(--ok);font-weight:600}
+  .grade-result.close{color:#b8860b;font-weight:600}
+  .grade-result.incorrect{color:var(--warn);font-weight:600}
+  .quiz-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .quiz-actions button{min-width:100px}
+  .quiz-score{font-size:14px;font-weight:700;margin-top:4px}
+  .quiz-score.perfect{color:var(--ok)}
+  .quiz-score.good{color:#b8860b}
+  .quiz-score.needs-work{color:var(--warn)}
+  .teach-highlight{background:linear-gradient(90deg,rgba(27,109,255,0.08),transparent);border-left:3px solid var(--accent);padding-left:8px}
   @media print{
     body{margin:0;background:white;}
     .bar,.masthead{page-break-inside:avoid;box-shadow:none;}
     button,input,select{display:none !important;}
+    .quiz-bar{display:none !important;}
   }
 </style>
 </head>
@@ -87,6 +104,34 @@
 <div class="welcome">
   <div class="t1">In-browser ECG teaching lab for learners and educators.</div>
   <div class="t2">Accurate measurements + print-quality layouts. Synthetic data is always labeled in-app; exports stay clean (no watermarks) while metadata keeps the synthetic flag.</div>
+</div>
+
+<div class="bar mode-bar">
+  <label>Mode
+    <select id="mode">
+      <option value="view" selected>View</option>
+      <option value="teach">Teach</option>
+      <option value="quiz">Quiz</option>
+    </select>
+  </label>
+  <span class="hint" id="modeHint">View mode: explore ECG with all measurements visible.</span>
+  <label>Case Pack
+    <select id="casePack">
+      <option value="">— None —</option>
+      <option value="basics">Basics (HR, rhythm)</option>
+      <option value="intervals">Intervals (PR, QRS, QT)</option>
+      <option value="axes">Axis determination</option>
+    </select>
+  </label>
+  <button id="prevCase" disabled>◀ Prev</button>
+  <span class="pill" id="caseProgress">—</span>
+  <button id="nextCase" disabled>Next ▶</button>
+  <button id="randomCase">Random Case</button>
+  <label>Dx
+    <select id="randomDx">
+      <option value="">Any</option>
+    </select>
+  </label>
 </div>
 
 <div class="masthead">
@@ -144,7 +189,7 @@
   <button id="pdfBtn">Print / PDF</button>
 </div>
 
-<div class="bar" style="width:100%">
+<div class="bar measurements-bar" id="measurementsBar" style="width:100%">
   <div class="grid2">
     <div class="kv"><div class="k">Ventricular rate</div><div class="v" id="m_hr">—</div></div>
     <div class="kv"><div class="k">PR</div><div class="v" id="m_pr">—</div></div>
@@ -153,6 +198,46 @@
     <div class="kv"><div class="k">Axes (P / QRS / T)</div><div class="v" id="m_axes">—</div></div>
     <div class="kv"><div class="k">Beats used (median)</div><div class="v" id="m_beats">—</div></div>
   </div>
+</div>
+
+<div class="bar quiz-bar" id="quizBar" style="width:100%;display:none">
+  <div class="grid2">
+    <div class="kv quiz-input">
+      <div class="k">Ventricular rate (bpm)</div>
+      <input type="number" id="q_hr" placeholder="?" min="20" max="300" />
+      <div class="grade-result" id="g_hr"></div>
+    </div>
+    <div class="kv quiz-input">
+      <div class="k">PR interval (ms)</div>
+      <input type="number" id="q_pr" placeholder="?" min="0" max="500" />
+      <div class="grade-result" id="g_pr"></div>
+    </div>
+    <div class="kv quiz-input">
+      <div class="k">QRS duration (ms)</div>
+      <input type="number" id="q_qrs" placeholder="?" min="0" max="300" />
+      <div class="grade-result" id="g_qrs"></div>
+    </div>
+    <div class="kv quiz-input">
+      <div class="k">QT interval (ms)</div>
+      <input type="number" id="q_qt" placeholder="?" min="0" max="700" />
+      <div class="grade-result" id="g_qt"></div>
+    </div>
+    <div class="kv quiz-input">
+      <div class="k">QRS axis (degrees)</div>
+      <input type="number" id="q_axis" placeholder="?" min="-180" max="180" />
+      <div class="grade-result" id="g_axis"></div>
+    </div>
+    <div class="kv quiz-actions">
+      <button id="gradeBtn">Grade Answers</button>
+      <button id="revealBtn">Reveal</button>
+      <div class="quiz-score" id="quizScore"></div>
+    </div>
+  </div>
+</div>
+
+<div class="bar teach-tips" id="teachTips" style="display:none;flex-direction:column;gap:8px">
+  <div style="font-weight:600;font-size:13px;color:var(--accent)">Teaching Tips</div>
+  <div id="tipContent" style="font-size:12px;color:var(--muted);line-height:1.5"></div>
 </div>
 
 <div class="wrap"><canvas id="c"></canvas></div>
@@ -164,6 +249,7 @@ import {
   normalizeECGData,
   fmtMs, fmtBpm, fmtDeg,
 } from "./js/ecg-core.js";
+import { synthECG, DIAGNOSES, generateRandomCase } from "./js/ecg-synth.js";
 
 const leads15 = ["I","II","III","aVR","aVL","aVF","V1","V2","V3","V4","V5","V6","V3R","V4R","V7"];
 const printGrid = [
@@ -205,6 +291,35 @@ const elPng = document.getElementById("pngBtn");
 const elPrintPng = document.getElementById("printPngBtn");
 const elPdf = document.getElementById("pdfBtn");
 
+// Mode & Quiz elements
+const elMode = document.getElementById("mode");
+const elModeHint = document.getElementById("modeHint");
+const elMeasurementsBar = document.getElementById("measurementsBar");
+const elQuizBar = document.getElementById("quizBar");
+const elCasePack = document.getElementById("casePack");
+const elPrevCase = document.getElementById("prevCase");
+const elNextCase = document.getElementById("nextCase");
+const elCaseProgress = document.getElementById("caseProgress");
+const elGradeBtn = document.getElementById("gradeBtn");
+const elRevealBtn = document.getElementById("revealBtn");
+const elQuizScore = document.getElementById("quizScore");
+const elRandomCase = document.getElementById("randomCase");
+const elRandomDx = document.getElementById("randomDx");
+const elTeachTips = document.getElementById("teachTips");
+const elTipContent = document.getElementById("tipContent");
+
+// Quiz inputs
+const qHr = document.getElementById("q_hr");
+const qPr = document.getElementById("q_pr");
+const qQrs = document.getElementById("q_qrs");
+const qQt = document.getElementById("q_qt");
+const qAxis = document.getElementById("q_axis");
+const gHr = document.getElementById("g_hr");
+const gPr = document.getElementById("g_pr");
+const gQrs = document.getElementById("g_qrs");
+const gQt = document.getElementById("g_qt");
+const gAxis = document.getElementById("g_axis");
+
 let META = null;
 let ANALYSIS = null;
 let calipers = false;
@@ -217,6 +332,309 @@ let analysisSeq = 0;
 let activeAnalysisId = 0;
 
 const PRINT_LOCKS = { speed:25, gain:10, pxmm:6 };
+
+// Case pack definitions
+const CASE_PACKS = {
+  basics: {
+    name: "Basics",
+    description: "Learn to measure heart rate and identify basic rhythm",
+    cases: [
+      { url: "../data/ecg_data_v5_world_class.json", focus: ["hr"], hint: "Count R-R intervals" },
+      { url: "../data/ecg_data.json", focus: ["hr"], hint: "Use calipers for precision" },
+    ]
+  },
+  intervals: {
+    name: "Intervals",
+    description: "Measure PR, QRS, and QT intervals accurately",
+    cases: [
+      { url: "../data/ecg_data_v5_world_class.json", focus: ["pr", "qrs", "qt"], hint: "PR: P onset to QRS onset" },
+      { url: "../data/ecg_data.json", focus: ["pr", "qrs", "qt"], hint: "QT: QRS onset to T-wave end" },
+    ]
+  },
+  axes: {
+    name: "Axis Determination",
+    description: "Determine the QRS axis using leads I and aVF",
+    cases: [
+      { url: "../data/ecg_data_v5_world_class.json", focus: ["axis"], hint: "Positive in I and aVF = normal axis" },
+      { url: "../data/ecg_data.json", focus: ["axis"], hint: "Use the quadrant method" },
+    ]
+  }
+};
+
+let currentMode = "view";
+let currentPack = null;
+let currentCaseIdx = 0;
+let quizGraded = false;
+
+const MODE_HINTS = {
+  view: "View mode: explore ECG with all measurements visible.",
+  teach: "Teach mode: measurements visible with educational highlights.",
+  quiz: "Quiz mode: enter your measurements, then grade your answers."
+};
+
+const TEACHING_TIPS = {
+  hr: [
+    "Heart rate = 60 / RR interval (in seconds)",
+    "Count large boxes between R-peaks: 300/boxes = HR",
+    "Normal pediatric HR varies by age: newborn ~140, child ~100, teen ~70",
+  ],
+  pr: [
+    "PR interval: from P-wave onset to QRS onset",
+    "Normal PR: 120-200ms in adults, shorter in children",
+    "Short PR (<120ms) may indicate WPW or junctional rhythm",
+    "Long PR (>200ms) suggests first-degree AV block",
+  ],
+  qrs: [
+    "QRS duration: from Q-wave onset to S-wave end",
+    "Normal QRS: <100ms (narrow complex)",
+    "Wide QRS (>120ms): bundle branch block, WPW, or ventricular origin",
+    "In RBBB, look for RSR' pattern in V1",
+  ],
+  qt: [
+    "QT interval: from QRS onset to T-wave end",
+    "QT varies with heart rate - use QTc for comparison",
+    "QTc (Bazett) = QT / sqrt(RR)",
+    "QTc >460ms in females or >450ms in males is prolonged",
+    "Long QT risk: torsades de pointes",
+  ],
+  axis: [
+    "QRS axis: net direction of ventricular depolarization",
+    "Quick method: if I and aVF both positive → normal axis (0° to +90°)",
+    "Left axis deviation: I positive, aVF negative, axis < -30°",
+    "Right axis deviation: I negative, aVF positive, axis > +90°",
+    "Pediatric normal axis shifts leftward with age (RVH → LVH pattern)",
+  ],
+};
+
+function setMode(mode) {
+  currentMode = mode;
+  elModeHint.textContent = MODE_HINTS[mode] || "";
+
+  if (mode === "quiz") {
+    elMeasurementsBar.style.display = "none";
+    elQuizBar.style.display = "block";
+    elTeachTips.style.display = "none";
+    clearQuizInputs();
+  } else if (mode === "teach") {
+    elMeasurementsBar.style.display = "block";
+    elQuizBar.style.display = "none";
+    elTeachTips.style.display = "flex";
+    elMeasurementsBar.classList.add("teach-highlight");
+    showTeachingTips();
+  } else {
+    elMeasurementsBar.style.display = "block";
+    elQuizBar.style.display = "none";
+    elTeachTips.style.display = "none";
+    elMeasurementsBar.classList.remove("teach-highlight");
+  }
+
+  draw();
+}
+
+function showTeachingTips() {
+  // Collect relevant tips based on current measurements
+  const tips = [];
+
+  // Always show basic tips
+  tips.push(...TEACHING_TIPS.hr.slice(0, 2));
+
+  if (ANALYSIS && ANALYSIS.measures) {
+    const m = ANALYSIS.measures;
+
+    // Add context-specific tips
+    if (m.PR != null) {
+      if (m.PR < 120) tips.push(TEACHING_TIPS.pr[2]); // Short PR
+      else if (m.PR > 200) tips.push(TEACHING_TIPS.pr[3]); // Long PR
+      else tips.push(TEACHING_TIPS.pr[0]);
+    }
+
+    if (m.QRS != null) {
+      if (m.QRS > 120) tips.push(TEACHING_TIPS.qrs[2]); // Wide QRS
+      else tips.push(TEACHING_TIPS.qrs[1]);
+    }
+
+    if (m.QTcB != null) {
+      if (m.QTcB > 460) tips.push(TEACHING_TIPS.qt[4]); // Long QT
+      else tips.push(TEACHING_TIPS.qt[2]);
+    }
+
+    if (m.axes && m.axes.qAxis != null) {
+      const axis = m.axes.qAxis;
+      if (axis < -30) tips.push(TEACHING_TIPS.axis[2]); // LAD
+      else if (axis > 90) tips.push(TEACHING_TIPS.axis[3]); // RAD
+      else tips.push(TEACHING_TIPS.axis[1]); // Normal
+    }
+  }
+
+  elTipContent.innerHTML = tips.map(t => `• ${t}`).join("<br>");
+}
+
+function clearQuizInputs() {
+  [qHr, qPr, qQrs, qQt, qAxis].forEach(el => { el.value = ""; });
+  [gHr, gPr, gQrs, gQt, gAxis].forEach(el => { el.textContent = ""; el.className = "grade-result"; });
+  elQuizScore.textContent = "";
+  elQuizScore.className = "quiz-score";
+  quizGraded = false;
+}
+
+function gradeAnswer(input, actual, tolerance, resultEl) {
+  const userVal = parseFloat(input.value);
+  if (isNaN(userVal) || actual == null || !isFinite(actual)) {
+    resultEl.textContent = actual != null ? `Answer: ${Math.round(actual)}` : "N/A";
+    resultEl.className = "grade-result";
+    return null;
+  }
+
+  const diff = Math.abs(userVal - actual);
+  const pctDiff = (diff / Math.abs(actual)) * 100;
+
+  if (diff <= tolerance) {
+    resultEl.textContent = `Correct! (${Math.round(actual)})`;
+    resultEl.className = "grade-result correct";
+    return 1;
+  } else if (diff <= tolerance * 2 || pctDiff <= 15) {
+    resultEl.textContent = `Close (${Math.round(actual)})`;
+    resultEl.className = "grade-result close";
+    return 0.5;
+  } else {
+    resultEl.textContent = `${Math.round(actual)} (off by ${Math.round(diff)})`;
+    resultEl.className = "grade-result incorrect";
+    return 0;
+  }
+}
+
+function gradeQuiz() {
+  if (!ANALYSIS || !ANALYSIS.measures) {
+    elQuizScore.textContent = "No analysis available";
+    return;
+  }
+
+  const m = ANALYSIS.measures;
+  let total = 0, maxScore = 0;
+
+  // HR: tolerance 5 bpm
+  const hrScore = gradeAnswer(qHr, m.hr, 5, gHr);
+  if (hrScore !== null) { total += hrScore; maxScore++; }
+
+  // PR: tolerance 20ms
+  const prScore = gradeAnswer(qPr, m.PR, 20, gPr);
+  if (prScore !== null) { total += prScore; maxScore++; }
+
+  // QRS: tolerance 10ms
+  const qrsScore = gradeAnswer(qQrs, m.QRS, 10, gQrs);
+  if (qrsScore !== null) { total += qrsScore; maxScore++; }
+
+  // QT: tolerance 20ms
+  const qtScore = gradeAnswer(qQt, m.QT, 20, gQt);
+  if (qtScore !== null) { total += qtScore; maxScore++; }
+
+  // Axis: tolerance 15 degrees
+  const axisScore = gradeAnswer(qAxis, m.axes?.qAxis, 15, gAxis);
+  if (axisScore !== null) { total += axisScore; maxScore++; }
+
+  const pct = maxScore > 0 ? Math.round((total / maxScore) * 100) : 0;
+  elQuizScore.textContent = `Score: ${pct}% (${total}/${maxScore})`;
+
+  if (pct >= 90) {
+    elQuizScore.className = "quiz-score perfect";
+  } else if (pct >= 70) {
+    elQuizScore.className = "quiz-score good";
+  } else {
+    elQuizScore.className = "quiz-score needs-work";
+  }
+
+  quizGraded = true;
+}
+
+function revealAnswers() {
+  if (!ANALYSIS || !ANALYSIS.measures) return;
+  const m = ANALYSIS.measures;
+
+  gHr.textContent = m.hr != null ? `${Math.round(m.hr)} bpm` : "N/A";
+  gPr.textContent = m.PR != null ? `${Math.round(m.PR)} ms` : "N/A";
+  gQrs.textContent = m.QRS != null ? `${Math.round(m.QRS)} ms` : "N/A";
+  gQt.textContent = m.QT != null ? `${Math.round(m.QT)} ms` : "N/A";
+  gAxis.textContent = m.axes?.qAxis != null ? `${Math.round(m.axes.qAxis)}°` : "N/A";
+
+  [gHr, gPr, gQrs, gQt, gAxis].forEach(el => el.className = "grade-result");
+}
+
+function loadCasePack(packId) {
+  if (!packId || !CASE_PACKS[packId]) {
+    currentPack = null;
+    currentCaseIdx = 0;
+    elPrevCase.disabled = true;
+    elNextCase.disabled = true;
+    elCaseProgress.textContent = "—";
+    return;
+  }
+
+  currentPack = CASE_PACKS[packId];
+  currentCaseIdx = 0;
+  updateCaseNav();
+  loadCurrentCase();
+}
+
+function updateCaseNav() {
+  if (!currentPack) {
+    elPrevCase.disabled = true;
+    elNextCase.disabled = true;
+    elCaseProgress.textContent = "—";
+    return;
+  }
+
+  elPrevCase.disabled = currentCaseIdx === 0;
+  elNextCase.disabled = currentCaseIdx >= currentPack.cases.length - 1;
+  elCaseProgress.textContent = `Case ${currentCaseIdx + 1}/${currentPack.cases.length}`;
+}
+
+function loadCurrentCase() {
+  if (!currentPack || !currentPack.cases[currentCaseIdx]) return;
+
+  const caseData = currentPack.cases[currentCaseIdx];
+  clearQuizInputs();
+  loadSample(caseData.url);
+
+  if (caseData.hint && currentMode === "quiz") {
+    elFooter.textContent = `Hint: ${caseData.hint}`;
+  }
+}
+
+function generateNewCase() {
+  const selectedDx = elRandomDx.value;
+  const dx = selectedDx || DIAGNOSES[Math.floor(Math.random() * DIAGNOSES.length)];
+  const age = Math.random() * 16; // 0-16 years (pediatric focus)
+  const seed = Math.floor(Math.random() * 100000) + 1;
+
+  try {
+    const ecgData = synthECG(age, dx, seed, true, true);
+    META = normalizeECGData(ecgData);
+    patientId = `P-${Math.floor(Math.random() * 90000 + 10000)}`;
+    recordedAt = new Date();
+    clearQuizInputs();
+    requestAnalysis(META);
+    updateMetrics();
+    draw();
+    elInfo.textContent = `Generated: ${dx}, age ${age.toFixed(1)}y, seed ${seed}`;
+
+    if (currentMode === "quiz") {
+      elFooter.textContent = `New case: ${dx} pattern. Measure the intervals!`;
+    }
+  } catch (err) {
+    elInfo.textContent = `Generation failed: ${err.message}`;
+    console.error(err);
+  }
+}
+
+// Populate diagnosis dropdown
+function populateDxDropdown() {
+  for (const dx of DIAGNOSES) {
+    const opt = document.createElement("option");
+    opt.value = dx;
+    opt.textContent = dx;
+    elRandomDx.appendChild(opt);
+  }
+}
 
 function ensureAnalysisWorker(){
   if(analysisWorker) return analysisWorker;
@@ -562,6 +980,11 @@ function updateMetrics(){
     : "—";
   const beatsUsed = (ANALYSIS.medBeat && ANALYSIS.medBeat.beatsUsed) || "—";
   elBeats.textContent = beatsUsed;
+
+  // Update teaching tips if in teach mode
+  if (currentMode === "teach") {
+    showTeachingTips();
+  }
 }
 
 async function loadSample(url){
@@ -622,6 +1045,27 @@ window.addEventListener("resize", draw);
 elSample.onchange = ()=> loadSample(elSample.value);
 elFile.onchange = ()=>{ if(elFile.files && elFile.files[0]) loadFromFile(elFile.files[0]); };
 
+// Mode & Quiz event listeners
+elMode.onchange = ()=> setMode(elMode.value);
+elGradeBtn.onclick = gradeQuiz;
+elRevealBtn.onclick = revealAnswers;
+elCasePack.onchange = ()=> loadCasePack(elCasePack.value);
+elPrevCase.onclick = ()=>{
+  if(currentCaseIdx > 0){
+    currentCaseIdx--;
+    updateCaseNav();
+    loadCurrentCase();
+  }
+};
+elNextCase.onclick = ()=>{
+  if(currentPack && currentCaseIdx < currentPack.cases.length - 1){
+    currentCaseIdx++;
+    updateCaseNav();
+    loadCurrentCase();
+  }
+};
+elRandomCase.onclick = generateNewCase;
+
 function exportPrintSnapshot(){
   if(!META) return;
   const prevLayout = elLayout.value;
@@ -668,6 +1112,7 @@ elPdf.onclick = ()=>{
 };
 
 syncControlLocks();
+populateDxDropdown();
 loadSample(elSample.value).catch(err=>{
   console.error(err);
   elInfo.textContent = "Failed to load sample";
