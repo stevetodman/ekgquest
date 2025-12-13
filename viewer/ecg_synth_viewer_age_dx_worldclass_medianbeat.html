@@ -69,15 +69,39 @@
   </label>
   <label>Diagnosis
     <select id="dx">
-      <option>Normal sinus</option>
-      <option>WPW</option>
-      <option>RBBB</option>
-      <option>LVH</option>
-      <option>RVH</option>
-      <option>SVT (narrow)</option>
-      <option>Atrial flutter (2:1)</option>
-      <option>Long QT</option>
-      <option>Pericarditis</option>
+      <optgroup label="Normal">
+        <option>Normal sinus</option>
+        <option>Sinus bradycardia</option>
+        <option>Sinus tachycardia</option>
+      </optgroup>
+      <optgroup label="Conduction">
+        <option>RBBB</option>
+        <option>LBBB</option>
+        <option>LAFB</option>
+        <option>1st degree AVB</option>
+        <option>2nd degree AVB (Wenckebach)</option>
+        <option>2nd degree AVB (Mobitz II)</option>
+        <option>3rd degree AVB</option>
+      </optgroup>
+      <optgroup label="Pre-excitation">
+        <option>WPW</option>
+      </optgroup>
+      <optgroup label="Hypertrophy">
+        <option>LVH</option>
+        <option>RVH</option>
+      </optgroup>
+      <optgroup label="Tachyarrhythmias">
+        <option>SVT (narrow)</option>
+        <option>Atrial flutter (2:1)</option>
+      </optgroup>
+      <optgroup label="Repolarization">
+        <option>Long QT</option>
+        <option>Pericarditis</option>
+      </optgroup>
+      <optgroup label="Ectopy">
+        <option>PACs</option>
+        <option>PVCs</option>
+      </optgroup>
     </select>
   </label>
   <label>Seed
