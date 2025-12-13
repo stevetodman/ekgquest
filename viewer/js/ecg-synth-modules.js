@@ -2,6 +2,15 @@
 // Step 1: Refactored into 5 explicit modules for independent testing and swapping
 import { ECG_SCHEMA_VERSION, clamp, lerp } from "./ecg-core.js";
 
+// Template-based morphology (feature-flagged)
+import {
+  USE_TEMPLATES,
+  templatesReady,
+  getTemplateWaveform,
+  addTemplateToVCG,
+  loadTemplateLibrary
+} from "./ecg-templates.js";
+
 // ============================================================================
 // UTILITIES
 // ============================================================================
@@ -1092,6 +1101,82 @@ function addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT, aScale, tJit, dT1, dT2, Tax
   addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.16, 0.04, 0.015 * aScale, axisDir(Taxis, -0.1));
 }
 
+// ============================================================================
+// TEMPLATE-BASED WAVE GENERATION (Feature-flagged alternative to parametric)
+// ============================================================================
+
+/**
+ * Add P wave using template morphology
+ */
+function addPWaveTemplate(Vx, Vy, Vz, fs, pCenter, aScale, dx, age, dP, rng) {
+  if (!templatesReady()) return false;
+
+  const waveform = getTemplateWaveform('p', dx, {
+    targetDurationMs: 100,
+    targetAmplitude: 0.1 * aScale,
+    targetFs: fs,
+    age
+  }, rng);
+
+  if (!waveform) return false;
+
+  // Calculate start sample (center waveform on pCenter)
+  const startSample = Math.round(pCenter * fs - waveform.length / 2);
+  addTemplateToVCG(Vx, Vy, Vz, waveform, dP, startSample, fs);
+  return true;
+}
+
+/**
+ * Add QRS complex using template morphology
+ */
+function addQRSTemplate(Vx, Vy, Vz, fs, qrsOn, qrsWidth, aScale, dx, age, dQ, isPVC, rng) {
+  if (!templatesReady()) return false;
+
+  // Select appropriate template category
+  const category = isPVC ? 'pvc' : 'qrs';
+  const targetDx = isPVC ? 'pvc' : dx;
+
+  const waveform = getTemplateWaveform(category, targetDx, {
+    targetDurationMs: qrsWidth * 1000,
+    targetAmplitude: aScale,
+    targetFs: fs,
+    age
+  }, rng);
+
+  if (!waveform) return false;
+
+  const startSample = Math.round(qrsOn * fs);
+  addTemplateToVCG(Vx, Vy, Vz, waveform, dQ, startSample, fs);
+  return true;
+}
+
+/**
+ * Add T wave using template morphology
+ */
+function addTWaveTemplate(Vx, Vy, Vz, fs, qrsOn, QT, aScale, dx, age, dT, isPVC, rng) {
+  if (!templatesReady()) return false;
+
+  const tPeak = qrsOn + 0.62 * QT;
+  const tDuration = 0.35 * QT * 1000; // T wave is ~35% of QT
+
+  const waveform = getTemplateWaveform('t', dx, {
+    targetDurationMs: tDuration,
+    targetAmplitude: 0.25 * aScale * (isPVC ? -0.7 : 1.0),
+    targetFs: fs,
+    age
+  }, rng);
+
+  if (!waveform) return false;
+
+  const startSample = Math.round((tPeak - tDuration / 2000) * fs);
+  addTemplateToVCG(Vx, Vy, Vz, waveform, dT, startSample, fs);
+  return true;
+}
+
+// ============================================================================
+// MORPHOLOGY MODEL (Main synthesis function)
+// ============================================================================
+
 export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
   const rng = mulberry32(Math.max(1, Math.floor(seed + 1000)));
   const RR = 60 / params.HR;
@@ -1146,46 +1231,72 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
     const dT1j = applyDirJitter(dT1, jitter.dirJitter);
     const dT2j = applyDirJitter(dT2, jitter.dirJitter);
 
-    // P wave with enhanced jitter
+    // P wave with enhanced jitter (template or parametric)
     if (beat.hasPWave && beat.pTime != null) {
       const pCenter = beat.pTime + 0.04 + jitter.timeJitterP;
       const pAmp = jitter.ampJitter * jitter.pAmpFactor;
-      addPWaveJittered(Vx, Vy, Vz, fs, pCenter, pAmp, jitter.pDurationFactor, dP1j, dP2j);
+
+      // Try template-based generation first (if enabled)
+      const usedTemplate = USE_TEMPLATES && addPWaveTemplate(
+        Vx, Vy, Vz, fs, pCenter, pAmp, dx, ageY, dP1j, rng
+      );
+
+      // Fall back to parametric generation
+      if (!usedTemplate) {
+        addPWaveJittered(Vx, Vy, Vz, fs, pCenter, pAmp, jitter.pDurationFactor, dP1j, dP2j);
+      }
     }
 
-    // QRS complex with enhanced jitter
+    // QRS complex with enhanced jitter (template or parametric)
     if (beat.hasQRS && beat.qrsTime != null) {
       const qrsOn = beat.qrsTime + jitter.timeJitterQRS;
       const qrsWidth = params.QRS * jitter.qrsDurationFactor;
       const qrsC = qrsOn + qrsWidth / 2;
 
-      addQRSJittered(Vx, Vy, Vz, fs, qrsOn, qrsC, params, jitter, dQ1j, dQ2j, dQ3j, dx, beat.isPVC, rng);
+      // Try template-based QRS generation first (if enabled)
+      const usedQRSTemplate = USE_TEMPLATES && addQRSTemplate(
+        Vx, Vy, Vz, fs, qrsOn, qrsWidth, jitter.ampJitter, dx, ageY, dQ2j, beat.isPVC, rng
+      );
 
-      // Morphology modifiers with jitter
-      if (!beat.isPVC) {
-        if (dx === "WPW") {
-          const dDelta = norm([dQ1j[0] * 0.6 + dQ2j[0] * 0.4, dQ1j[1] * 0.6 + dQ2j[1] * 0.4, dQ1j[2] * 0.6 + dQ2j[2] * 0.4]);
-          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + jitter.timeJitterQRS, 0.022, 0.28 * jitter.ampJitter, dDelta);
-        }
-        if (dx === "RBBB") {
-          const dLate = applyDirJitter(norm([-0.9, 0.0, 0.95]), jitter.dirJitter);
-          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * qrsWidth, 0.01 + 0.08 * qrsWidth, 0.35 * jitter.ampJitter, dLate);
-        }
-        if (dx === "LVH") {
-          addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.16 * qrsWidth, 0.55 * jitter.ampJitter, axisDir(params.QRSaxis - 20, params.zQ2 * 0.8));
-        }
-        if (dx === "RVH") {
-          addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.14 * qrsWidth, 0.45 * jitter.ampJitter, applyDirJitter(norm([-0.75, 0.2, 0.95]), jitter.dirJitter));
-        }
-        if (dx === "LAFB") {
-          addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * qrsWidth, 0.08 * qrsWidth, 0.15 * jitter.ampJitter, applyDirJitter(norm([0.9, -0.3, 0.1]), jitter.dirJitter));
+      // Fall back to parametric generation
+      if (!usedQRSTemplate) {
+        addQRSJittered(Vx, Vy, Vz, fs, qrsOn, qrsC, params, jitter, dQ1j, dQ2j, dQ3j, dx, beat.isPVC, rng);
+
+        // Morphology modifiers with jitter (only for parametric)
+        if (!beat.isPVC) {
+          if (dx === "WPW") {
+            const dDelta = norm([dQ1j[0] * 0.6 + dQ2j[0] * 0.4, dQ1j[1] * 0.6 + dQ2j[1] * 0.4, dQ1j[2] * 0.6 + dQ2j[2] * 0.4]);
+            addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + jitter.timeJitterQRS, 0.022, 0.28 * jitter.ampJitter, dDelta);
+          }
+          if (dx === "RBBB") {
+            const dLate = applyDirJitter(norm([-0.9, 0.0, 0.95]), jitter.dirJitter);
+            addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * qrsWidth, 0.01 + 0.08 * qrsWidth, 0.35 * jitter.ampJitter, dLate);
+          }
+          if (dx === "LVH") {
+            addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.16 * qrsWidth, 0.55 * jitter.ampJitter, axisDir(params.QRSaxis - 20, params.zQ2 * 0.8));
+          }
+          if (dx === "RVH") {
+            addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.14 * qrsWidth, 0.45 * jitter.ampJitter, applyDirJitter(norm([-0.75, 0.2, 0.95]), jitter.dirJitter));
+          }
+          if (dx === "LAFB") {
+            addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * qrsWidth, 0.08 * qrsWidth, 0.15 * jitter.ampJitter, applyDirJitter(norm([0.9, -0.3, 0.1]), jitter.dirJitter));
+          }
         }
       }
 
-      // T wave with enhanced jitter
+      // T wave with enhanced jitter (template or parametric)
       const tAmp = jitter.ampJitter * jitter.tAmpFactor;
       const tDur = jitter.tDurationFactor;
-      addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, jitter.timeJitterT, dT1j, dT2j, params.Taxis, beat.isPVC);
+
+      // Try template-based T wave generation first (if enabled)
+      const usedTTemplate = USE_TEMPLATES && addTWaveTemplate(
+        Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, dx, ageY, dT1j, beat.isPVC, rng
+      );
+
+      // Fall back to parametric generation
+      if (!usedTTemplate) {
+        addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, jitter.timeJitterT, dT1j, dT2j, params.Taxis, beat.isPVC);
+      }
 
       // Pericarditis ST changes
       if (dx === "Pericarditis" && !beat.isPVC && beat.pTime != null) {
