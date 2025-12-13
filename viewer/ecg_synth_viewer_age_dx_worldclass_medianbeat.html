@@ -49,6 +49,7 @@
   .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#fff;border:1px solid var(--border);border-radius:6px;padding:1px 6px;color:var(--text)}
   .ok{color:var(--ok); font-weight:650}
   .bad{color:var(--warn); font-weight:650}
+  .borderline{color:#b8860b; font-weight:600}
   .grid2{display:grid;grid-template-columns:repeat(6,minmax(160px,1fr));gap:8px;width:100%}
   .kv{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 10px;min-height:44px}
   .k{font-size:11px;color:var(--muted);margin-bottom:3px}
@@ -155,10 +156,10 @@
 
 <div class="bar" style="width:100%">
   <div class="grid2">
-    <div class="kv"><div class="k">Ventricular rate</div><div class="v" id="m_hr">—</div></div>
-    <div class="kv"><div class="k">PR</div><div class="v" id="m_pr">—</div></div>
-    <div class="kv"><div class="k">QRS</div><div class="v" id="m_qrs">—</div></div>
-    <div class="kv"><div class="k">QT</div><div class="v" id="m_qt">—</div></div>
+    <div class="kv"><div class="k">Ventricular rate <small style="color:#888">✓/✗ vs age norms</small></div><div class="v" id="m_hr">—</div></div>
+    <div class="kv"><div class="k">PR interval <small style="color:#888">Rijnbeek 2001</small></div><div class="v" id="m_pr">—</div></div>
+    <div class="kv"><div class="k">QRS duration <small style="color:#888">Rijnbeek 2001</small></div><div class="v" id="m_qrs">—</div></div>
+    <div class="kv"><div class="k">QT interval</div><div class="v" id="m_qt">—</div></div>
     <div class="kv"><div class="k">QTc (Bazett / Fridericia / Framingham)</div><div class="v" id="m_qtc">—</div></div>
     <div class="kv"><div class="k">Axes (P / QRS / T)</div><div class="v" id="m_axes">—</div></div>
     <div class="kv"><div class="k">Physics checks</div><div class="v" id="m_phys">—</div></div>
@@ -191,6 +192,59 @@ import {
    - Use median-derived fiducial offsets to place fiducials on the full tracing
    - HR still comes from mean RR on the full recording
    ------------------------------------------------------------- */
+
+// ---------- pediatric normal ranges (Rijnbeek 2001) ----------
+// Returns {low, high, status: 'normal'|'borderline'|'abnormal'}
+const RIJNBEEK_NORMS = {
+  // [age_max, HR_low, HR_high, PR_low, PR_high, QRS_low, QRS_high, QTc_low, QTc_high]
+  bins: [
+    [0.083, 129, 192, 77, 120, 50, 85, 378, 448],   // 0-1m
+    [0.25,  126, 187, 78, 133, 48, 77, 381, 458],   // 1-3m
+    [0.5,   112, 165, 84, 134, 50, 85, 386, 453],   // 3-6m
+    [1.0,   106, 194, 82, 141, 52, 86, 379, 449],   // 6-12m
+    [3.0,   95, 178, 78, 151, 54, 88, 381, 455],    // 1-3y
+    [5.0,   73, 124, 98, 153, 58, 92, 377, 448],    // 3-5y
+    [8.0,   62, 115, 92, 160, 59, 98, 371, 449],    // 5-8y
+    [12.0,  55, 110, 103, 174, 66, 103, 365, 447],  // 8-12y
+    [16.0,  48, 107, 106, 178, 72, 111, 362, 457],  // 12-16y
+    [99,    50, 100, 120, 200, 70, 110, 350, 460],  // adult
+  ]
+};
+
+function getNormalRange(age, param) {
+  const bins = RIJNBEEK_NORMS.bins;
+  let bin = bins[bins.length - 1]; // default adult
+  for (let i = 0; i < bins.length; i++) {
+    if (age <= bins[i][0]) { bin = bins[i]; break; }
+  }
+  const idx = {HR: [1,2], PR: [3,4], QRS: [5,6], QTc: [7,8]}[param];
+  if (!idx) return null;
+  return { low: bin[idx[0]], high: bin[idx[1]] };
+}
+
+function checkNormal(value, age, param) {
+  if (value == null) return { status: 'unknown', text: '' };
+  const range = getNormalRange(age, param);
+  if (!range) return { status: 'unknown', text: '' };
+
+  const margin = (range.high - range.low) * 0.1; // 10% borderline zone
+  if (value >= range.low && value <= range.high) {
+    return { status: 'normal', text: `(${range.low}-${range.high})`, range };
+  } else if (value >= range.low - margin && value <= range.high + margin) {
+    return { status: 'borderline', text: `(${range.low}-${range.high})`, range };
+  } else {
+    return { status: 'abnormal', text: `(${range.low}-${range.high})`, range };
+  }
+}
+
+function fmtWithNorm(value, age, param, unit = 'ms') {
+  if (value == null) return '—';
+  const check = checkNormal(value, age, param);
+  const valStr = unit === 'bpm' ? `${Math.round(value)} bpm` : `${Math.round(value)} ms`;
+  const cls = check.status === 'normal' ? 'ok' : (check.status === 'borderline' ? '' : 'bad');
+  const icon = check.status === 'normal' ? '✓' : (check.status === 'borderline' ? '~' : '✗');
+  return `<span class="${cls}">${valStr}</span> <small>${icon} ${check.text}</small>`;
+}
 
 // ---------- utilities ----------
 function interpAnchors(age, anchors, key){
@@ -912,15 +966,23 @@ function updateUI(){
   document.getElementById("m_dx").textContent = META.targets.dx || "—";
   document.getElementById("m_age").textContent = (META.targets.age_years!=null) ? `${META.targets.age_years} y` : "—";
 
-  // HR, intervals, QTc
+  // HR, intervals, QTc - with age-adjusted normal ranges
+  const age = META.targets?.age_years ?? 25;
   if(MEAS){
-    document.getElementById("m_hr").textContent = fmtBpm(MEAS.hr);
-    document.getElementById("m_pr").textContent = (MEAS.PR==null) ? "N/A" : fmtMs(MEAS.PR);
-    document.getElementById("m_qrs").textContent = (MEAS.QRS==null) ? "—" : fmtMs(MEAS.QRS);
-    document.getElementById("m_qt").textContent = (MEAS.QT==null) ? "—" : fmtMs(MEAS.QT);
-    const qtc = (MEAS.QTcB==null) ? "—" :
-      `${Math.round(MEAS.QTcB)} / ${Math.round(MEAS.QTcF)} / ${Math.round(MEAS.QTcFram)} ms`;
-    document.getElementById("m_qtc").textContent = qtc;
+    document.getElementById("m_hr").innerHTML = fmtWithNorm(MEAS.hr, age, 'HR', 'bpm');
+    document.getElementById("m_pr").innerHTML = (MEAS.PR==null) ? "N/A" : fmtWithNorm(MEAS.PR, age, 'PR', 'ms');
+    document.getElementById("m_qrs").innerHTML = (MEAS.QRS==null) ? "—" : fmtWithNorm(MEAS.QRS, age, 'QRS', 'ms');
+    document.getElementById("m_qt").innerHTML = (MEAS.QT==null) ? "—" : fmtMs(MEAS.QT);
+    // QTc with normal range check
+    if (MEAS.QTcB != null) {
+      const qtcCheck = checkNormal(MEAS.QTcB, age, 'QTc');
+      const cls = qtcCheck.status === 'normal' ? 'ok' : (qtcCheck.status === 'borderline' ? '' : 'bad');
+      const icon = qtcCheck.status === 'normal' ? '✓' : (qtcCheck.status === 'borderline' ? '~' : '✗');
+      document.getElementById("m_qtc").innerHTML =
+        `<span class="${cls}">${Math.round(MEAS.QTcB)}</span> / ${Math.round(MEAS.QTcF)} / ${Math.round(MEAS.QTcFram)} ms <small>${icon} ${qtcCheck.text}</small>`;
+    } else {
+      document.getElementById("m_qtc").textContent = "—";
+    }
 
     const ax = MEAS.axes;
     document.getElementById("m_axes").textContent = `${fmtDeg(ax.pAxis)} / ${fmtDeg(ax.qAxis)} / ${fmtDeg(ax.tAxis)}`;
