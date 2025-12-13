@@ -10,8 +10,8 @@ A world-class in-browser ECG teaching laboratory featuring a MUSE-style viewer w
 # Serve locally (any static server works)
 python -m http.server 8000
 
-# Open the synthesizer viewer
-open http://localhost:8000/viewer/ecg_synth_viewer_age_dx_worldclass_medianbeat.html
+# Open the flagship teaching lab
+open http://localhost:8000/viewer/ekgquest_lab.html
 ```
 
 ## Project Structure
@@ -23,8 +23,10 @@ ekgquest/
 │   │   ├── ecg-core.js       # Core utilities: normalization, R-peak detection, measurements
 │   │   ├── ecg-synth.js      # Synthesis engine coordinator
 │   │   ├── ecg-synth-modules.js  # Modular morphology generation
+│   │   ├── ecg-templates.js  # Template-based morphology engine
 │   │   └── ecg-worker.js     # Web Worker for off-thread analysis
-│   ├── ecg_synth_viewer_*.html   # Synthesizer + measurements viewer
+│   ├── ekgquest_lab.html     # ⭐ Flagship teaching lab (recommended)
+│   ├── ecg_synth_viewer_*.html   # Legacy synthesizer viewer
 │   └── ecg_viewer_unified.html   # Stacked/print layouts, file loader
 ├── python/
 │   └── realism_lab/          # Validation toolkit
@@ -43,18 +45,26 @@ ekgquest/
 
 ## Key Features
 
+### EKGQuest Lab (Flagship)
+- **Quiz/Teach Mode**: Toggle between hidden and revealed measurements for teaching
+- **One-click reveal**: "Reveal Answers" button for classroom use
+- **Professional calipers**: Multiple measurements, drag-to-adjust, snap to R-peaks, Shift for H/V constraint
+- **Export options**: Print Worksheet (quiz), Print Answer Key (teach), PNG, JSON, CSV
+- **Clean waveforms**: No overlays on the ECG trace; provenance in header only
+
 ### ECG Synthesizer
 - **19 diagnoses**: Normal sinus, WPW, RBBB, LBBB, LAFB, LVH, RVH, SVT, Atrial flutter, AVB (1st/2nd/3rd degree), Long QT, Pericarditis, PACs, PVCs, Sinus brady/tachy
 - **Age-appropriate physiology**: Validated against Rijnbeek 2001 pediatric norms (0-16 years)
 - **Beat-to-beat variation**: Respiratory modulation, amplitude jitter, timing variability
+- **Template morphology**: Feature-flagged real-waveform templates for enhanced realism
 - **Physics consistency**: Einthoven's law enforced on limb leads
 - **Reproducible**: Deterministic output with seed control
 
 ### Viewer
 - **MUSE-style layouts**: Stacked, 12-lead grid, rhythm strip
-- **Accurate measurements**: PR, QRS, QT/QTc, axis calculations
+- **Accurate measurements**: PR, QRS, QT/QTc, axis calculations with age-adjusted norms
 - **Print-ready**: 25mm/s, 10mm/mV scaling with calibration pulse
-- **Interactive calipers**: Press 'C' or toggle for manual measurement
+- **Interactive calipers**: Press 'C' to toggle; shows Δt, rate, and ΔV
 
 ### Validation Pipeline (Realism Lab)
 - **5 quality gates**: Physics, Distribution, HRV, Spectral, External Reference
