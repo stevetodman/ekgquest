@@ -1472,14 +1472,29 @@ function autoDigitizeImage(img, calibration) {
       }
     };
 
+    // Calculate quality score
+    const leadCount = Object.keys(extracted.leads_uV).length;
+    const sampleCount = Object.values(extracted.leads_uV)[0]?.length || 0;
+    const hasData = sampleCount > 100;
+
+    // Check for reasonable signal (not flat, not noise)
+    const mainLead = leads['II'] || Object.values(leads)[0];
+    const signalRange = Math.max(...mainLead) - Math.min(...mainLead);
+    const signalQuality = signalRange > 200 && signalRange < 10000 ? 'good' : 'uncertain';
+
     // Switch to waveform mode (not image mode)
     imageMode = false;
     uploadedImage = null;
     document.getElementById('calibrationControls').style.display = 'none';
 
-    // Update UI
+    // Update UI with quality info
     updateAfterLoad();
-    showStatus('ECG digitized! Now works like a generated ECG.', 'success');
+
+    if (signalQuality === 'good') {
+      showStatus(`ECG digitized (${leadCount} lead${leadCount > 1 ? 's' : ''}, ${(extracted.duration_s).toFixed(1)}s). Works like a generated ECG!`, 'success');
+    } else {
+      showStatus(`ECG digitized but quality uncertain. Verify measurements manually.`, 'warning');
+    }
 
   } catch (err) {
     console.error('Digitization error:', err);
