@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test/smoke.test.js && node test/golden.test.js && node test/validation.test.js && node test/measurement.test.js && node test/synth-validation.test.js"
+    "test": "node test/smoke.test.js && node test/golden.test.js && node test/validation.test.js && node test/measurement.test.js && node test/synth-validation.test.js && node test/synth-modules.test.js"
   }
 }

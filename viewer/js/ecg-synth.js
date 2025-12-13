@@ -115,12 +115,22 @@ export const DIAGNOSES = [
   "Normal sinus",
   "WPW",
   "RBBB",
+  "LBBB",
+  "LAFB",
   "LVH",
   "RVH",
   "SVT (narrow)",
   "Atrial flutter (2:1)",
+  "1st degree AVB",
+  "2nd degree AVB (Wenckebach)",
+  "2nd degree AVB (Mobitz II)",
+  "3rd degree AVB",
   "Long QT",
   "Pericarditis",
+  "PACs",
+  "PVCs",
+  "Sinus bradycardia",
+  "Sinus tachycardia",
 ];
 
 export function applyDx(p, dx) {
@@ -131,6 +141,13 @@ export function applyDx(p, dx) {
   }
   if (dx === "RBBB") {
     q.QRS = Math.min(0.14, p.QRS + 0.04);
+  }
+  if (dx === "LBBB") {
+    q.QRS = Math.min(0.16, p.QRS + 0.06);
+    q.QRSaxis = Math.max(-45, p.QRSaxis - 40);
+  }
+  if (dx === "LAFB") {
+    q.QRSaxis = Math.max(-60, p.QRSaxis - 50);
   }
   if (dx === "LVH") {
     q.QRSaxis = Math.max(-30, p.QRSaxis - 35);
@@ -145,9 +162,19 @@ export function applyDx(p, dx) {
   if (dx === "Atrial flutter (2:1)") {
     q.HR = Math.max(120, Math.min(180, p.HR * 1.5));
   }
+  if (dx === "1st degree AVB") {
+    q.PR = Math.min(0.28, p.PR + 0.08);
+  }
   if (dx === "Long QT") {
     q.QTc = 0.5;
   }
+  if (dx === "Sinus bradycardia") {
+    q.HR = Math.max(40, Math.min(60, p.HR * 0.6));
+  }
+  if (dx === "Sinus tachycardia") {
+    q.HR = Math.max(100, Math.min(150, p.HR * 1.4));
+  }
+  // Complex rhythm abnormalities handled in synthECG: 2nd/3rd degree AVB, PACs, PVCs
   return q;
 }
 
@@ -171,6 +198,54 @@ function dotDipole(Vx, Vy, Vz, r) {
   const out = new Float64Array(Vx.length);
   for (let i = 0; i < out.length; i++) out[i] = Vx[i] * r[0] + Vy[i] * r[1] + Vz[i] * r[2];
   return out;
+}
+
+// Helper to add a P wave
+function addPWave(Vx, Vy, Vz, fs, pCenter, aScale, dP1, dP2) {
+  addGaussian3(Vx, Vy, Vz, fs, pCenter - 0.01, 0.014, 0.075 * aScale, dP1);
+  addGaussian3(Vx, Vy, Vz, fs, pCenter + 0.012, 0.016, 0.095 * aScale, dP2);
+}
+
+// Helper to add a QRS complex
+function addQRS(Vx, Vy, Vz, fs, qrsOn, qrsC, p, aScale, tJit, dQ1, dQ2, dQ3, dx, isPVC = false) {
+  const qrsWidth = isPVC ? p.QRS * 1.8 : p.QRS;
+  const qrsAmp = isPVC ? 1.4 : 1.0;
+
+  // For LBBB: broad notched QRS, reversed septal activation
+  if (dx === "LBBB") {
+    const dLBBB1 = norm([0.85, 0.3, 0.4]);
+    const dLBBB2 = norm([0.7, 0.6, -0.2]);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.35 * qrsWidth + tJit, 0.12 * qrsWidth, 0.6 * aScale, dLBBB1);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.18 * qrsWidth, 0.9 * aScale, dLBBB2);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.35 * qrsWidth + tJit, 0.14 * qrsWidth, 0.5 * aScale, dLBBB1);
+    return;
+  }
+
+  // For PVCs: wide bizarre morphology
+  if (isPVC) {
+    const dPVC = norm([0.3 + Math.random() * 0.4, 0.8, -0.5 + Math.random() * 0.3]);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.3 * qrsWidth + tJit, 0.12 * qrsWidth, 0.4 * aScale * qrsAmp, dQ1);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.2 * qrsWidth, 1.2 * aScale * qrsAmp, dPVC);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.35 * qrsWidth + tJit, 0.15 * qrsWidth, 0.5 * aScale * qrsAmp, dQ3);
+    return;
+  }
+
+  // Normal QRS
+  addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.32 * qrsWidth + tJit, 0.09 * qrsWidth, 0.22 * aScale * qrsAmp, dQ1);
+  addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.16 * qrsWidth, 1.1 * aScale * qrsAmp, dQ2);
+  addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.34 * qrsWidth + tJit, 0.12 * qrsWidth, 0.36 * aScale * qrsAmp, dQ3);
+}
+
+// Helper to add T wave
+function addTWave(Vx, Vy, Vz, fs, qrsOn, QT, aScale, tJit, dT1, dT2, Taxis, isPVC = false) {
+  const tPeak = qrsOn + 0.62 * QT + tJit;
+  const tAmp = isPVC ? 0.7 : 1.0; // PVCs have discordant T waves
+  const tDir1 = isPVC ? norm([-dT1[0], -dT1[1], -dT1[2]]) : dT1;
+  const tDir2 = isPVC ? norm([-dT2[0], -dT2[1], -dT2[2]]) : dT2;
+
+  addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.0, 0.1 * QT, 0.22 * aScale * tAmp, tDir1);
+  addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.03, 0.14 * QT, 0.18 * aScale * tAmp, tDir2);
+  addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.16, 0.04, 0.015 * aScale, axisDir(Taxis, -0.1));
 }
 
 // ---------- main synthesis function ----------
@@ -198,16 +273,89 @@ export function synthECG(ageY, dx, seed, enableNoise = true, enableFilters = tru
 
   const rng = mulberry32(Math.max(1, Math.floor(seed)));
 
-  const beatStarts = [];
+  // Generate P wave times (atrial rhythm)
+  const pWaveTimes = [];
   let tt = 0.6;
-  const rrJit = dx.includes("flutter") || dx.includes("SVT") ? 0.0 : 0.006;
+  const rrJit = dx.includes("flutter") || dx.includes("SVT") || dx.includes("AVB") ? 0.0 : 0.006;
   while (tt < duration - 0.8) {
-    beatStarts.push(tt);
+    pWaveTimes.push(tt);
     const rsa = dx.includes("flutter") || dx.includes("SVT") ? 0 : 0.018 * Math.sin(2 * Math.PI * 0.22 * tt);
     const rr = RR * (1.0 + rsa) + randn(rng) * rrJit;
     tt += clamp(rr, 0.35, 1.2);
   }
 
+  // Build beat schedule based on rhythm type
+  const beats = []; // { pTime, qrsTime, hasPWave, hasQRS, isPVC, prInterval }
+
+  if (dx === "3rd degree AVB") {
+    // Complete heart block: P waves at sinus rate, QRS at escape rate (~40 bpm)
+    const escapeRR = 1.5; // ~40 bpm escape rhythm
+    let escapeT = 0.8;
+    for (const pT of pWaveTimes) {
+      beats.push({ pTime: pT, qrsTime: null, hasPWave: true, hasQRS: false, isPVC: false, prInterval: null });
+    }
+    while (escapeT < duration - 0.6) {
+      beats.push({ pTime: null, qrsTime: escapeT, hasPWave: false, hasQRS: true, isPVC: false, prInterval: null });
+      escapeT += escapeRR + randn(rng) * 0.05;
+    }
+  } else if (dx === "2nd degree AVB (Wenckebach)") {
+    // Progressive PR prolongation until dropped beat (3:2 or 4:3 pattern)
+    let cyclePos = 0;
+    const cycleLen = 4; // 4:3 block
+    for (const pT of pWaveTimes) {
+      const prIncrement = 0.04 * cyclePos;
+      const effectivePR = p.PR + prIncrement;
+      if (cyclePos < cycleLen - 1) {
+        beats.push({ pTime: pT, qrsTime: pT + effectivePR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: effectivePR });
+      } else {
+        // Dropped beat
+        beats.push({ pTime: pT, qrsTime: null, hasPWave: true, hasQRS: false, isPVC: false, prInterval: null });
+      }
+      cyclePos = (cyclePos + 1) % cycleLen;
+    }
+  } else if (dx === "2nd degree AVB (Mobitz II)") {
+    // Fixed PR with occasional dropped beats (3:1 or 2:1)
+    let beatCount = 0;
+    const dropEvery = 3;
+    for (const pT of pWaveTimes) {
+      if (beatCount % dropEvery !== dropEvery - 1) {
+        beats.push({ pTime: pT, qrsTime: pT + p.PR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: p.PR });
+      } else {
+        beats.push({ pTime: pT, qrsTime: null, hasPWave: true, hasQRS: false, isPVC: false, prInterval: null });
+      }
+      beatCount++;
+    }
+  } else if (dx === "PACs") {
+    // Normal rhythm with occasional early P waves
+    for (let i = 0; i < pWaveTimes.length; i++) {
+      const pT = pWaveTimes[i];
+      beats.push({ pTime: pT, qrsTime: pT + p.PR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: p.PR });
+      // Add PAC after ~every 5th beat
+      if (i > 0 && i % 5 === 3 && pT + RR * 0.65 < duration - 0.5) {
+        const pacTime = pT + RR * 0.65;
+        beats.push({ pTime: pacTime, qrsTime: pacTime + p.PR * 0.9, hasPWave: true, hasQRS: true, isPVC: false, prInterval: p.PR * 0.9 });
+      }
+    }
+  } else if (dx === "PVCs") {
+    // Normal rhythm with occasional PVCs (no preceding P wave, wide QRS)
+    for (let i = 0; i < pWaveTimes.length; i++) {
+      const pT = pWaveTimes[i];
+      beats.push({ pTime: pT, qrsTime: pT + p.PR, hasPWave: true, hasQRS: true, isPVC: false, prInterval: p.PR });
+      // Add PVC after ~every 4th beat
+      if (i > 0 && i % 4 === 2 && pT + RR * 0.7 < duration - 0.5) {
+        const pvcTime = pT + RR * 0.7;
+        beats.push({ pTime: null, qrsTime: pvcTime, hasPWave: false, hasQRS: true, isPVC: true, prInterval: null });
+      }
+    }
+  } else {
+    // Normal conduction: each P wave followed by QRS
+    for (const pT of pWaveTimes) {
+      const skipP = dx === "SVT (narrow)" || dx === "Atrial flutter (2:1)";
+      beats.push({ pTime: skipP ? null : pT, qrsTime: pT + p.PR, hasPWave: !skipP, hasQRS: true, isPVC: false, prInterval: p.PR });
+    }
+  }
+
+  // Atrial flutter waves
   if (dx === "Atrial flutter (2:1)") {
     const f = 5.0,
       amp = 0.07;
@@ -222,64 +370,73 @@ export function synthECG(ageY, dx, seed, enableNoise = true, enableFilters = tru
     }
   }
 
-  for (const t0 of beatStarts) {
+  // Generate waveforms for each beat
+  for (const beat of beats) {
     const aScale = 1.0 + randn(rng) * 0.02;
     const tJit = randn(rng) * 0.003;
-    const qrsOn = t0 + p.PR;
-    const qrsC = qrsOn + p.QRS / 2;
 
-    if (dx !== "SVT (narrow)" && dx !== "Atrial flutter (2:1)") {
-      const pCenter = qrsOn - 0.055 + tJit;
-      addGaussian3(Vx, Vy, Vz, fs, pCenter - 0.01, 0.014, 0.075 * aScale, dP1);
-      addGaussian3(Vx, Vy, Vz, fs, pCenter + 0.012, 0.016, 0.095 * aScale, dP2);
+    // P wave
+    if (beat.hasPWave && beat.pTime != null) {
+      const pCenter = beat.pTime + 0.04 + tJit;
+      addPWave(Vx, Vy, Vz, fs, pCenter, aScale, dP1, dP2);
     }
 
-    addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.32 * p.QRS + tJit, 0.09 * p.QRS, 0.22 * aScale, dQ1);
-    addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.16 * p.QRS, 1.1 * aScale, dQ2);
-    addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.34 * p.QRS + tJit, 0.12 * p.QRS, 0.36 * aScale, dQ3);
+    // QRS complex
+    if (beat.hasQRS && beat.qrsTime != null) {
+      const qrsOn = beat.qrsTime;
+      const qrsC = qrsOn + p.QRS / 2;
 
-    if (dx === "WPW") {
-      const dDelta = norm([dQ1[0] * 0.6 + dQ2[0] * 0.4, dQ1[1] * 0.6 + dQ2[1] * 0.4, dQ1[2] * 0.6 + dQ2[2] * 0.4]);
-      addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + tJit, 0.022, 0.28 * aScale, dDelta);
-    }
-    if (dx === "RBBB") {
-      const dLate = norm([-0.9, 0.0, 0.95]);
-      addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * p.QRS + tJit, 0.01 + 0.08 * p.QRS, 0.35 * aScale, dLate);
-    }
-    if (dx === "LVH") {
-      addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.16 * p.QRS, 0.55 * aScale, axisDir(p.QRSaxis - 20, p.zQ2 * 0.8));
-    }
-    if (dx === "RVH") {
-      addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.14 * p.QRS, 0.45 * aScale, norm([-0.75, 0.2, 0.95]));
-    }
+      addQRS(Vx, Vy, Vz, fs, qrsOn, qrsC, p, aScale, tJit, dQ1, dQ2, dQ3, dx, beat.isPVC);
 
-    const tPeak = qrsOn + 0.62 * QT + tJit;
-    addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.0, 0.1 * QT, 0.22 * aScale, dT1);
-    addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.03, 0.14 * QT, 0.18 * aScale, dT2);
-    addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.16, 0.04, 0.015 * aScale, axisDir(p.Taxis, -0.1));
-
-    if (dx === "Pericarditis") {
-      const tau = 0.008;
-      const dST = axisDir(p.Taxis, p.zT * 0.7);
-      const dPR = axisDir(p.Paxis, 0.0);
-      function sig(tt) {
-        return 0.5 * (1 + Math.tanh(tt / tau));
+      // Morphology modifiers (not for PVCs which have their own morphology)
+      if (!beat.isPVC) {
+        if (dx === "WPW") {
+          const dDelta = norm([dQ1[0] * 0.6 + dQ2[0] * 0.4, dQ1[1] * 0.6 + dQ2[1] * 0.4, dQ1[2] * 0.6 + dQ2[2] * 0.4]);
+          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + tJit, 0.022, 0.28 * aScale, dDelta);
+        }
+        if (dx === "RBBB") {
+          const dLate = norm([-0.9, 0.0, 0.95]);
+          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * p.QRS + tJit, 0.01 + 0.08 * p.QRS, 0.35 * aScale, dLate);
+        }
+        if (dx === "LVH") {
+          addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.16 * p.QRS, 0.55 * aScale, axisDir(p.QRSaxis - 20, p.zQ2 * 0.8));
+        }
+        if (dx === "RVH") {
+          addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.14 * p.QRS, 0.45 * aScale, norm([-0.75, 0.2, 0.95]));
+        }
+        if (dx === "LAFB") {
+          // Left anterior fascicular block: small q in I, aVL; small r in II, III, aVF
+          addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * p.QRS + tJit, 0.08 * p.QRS, 0.15 * aScale, norm([0.9, -0.3, 0.1]));
+        }
       }
-      const j = qrsOn + 0.04;
-      const stEnd = qrsOn + 0.18;
-      const prStart = t0 + 0.1;
-      const prEnd = qrsOn - 0.01;
-      const aST = 0.1 * aScale;
-      const aPR = -0.04 * aScale;
-      const i0 = Math.max(0, Math.floor((t0 + 0.05) * fs));
-      const i1 = Math.min(N - 1, Math.ceil((stEnd + 0.25) * fs));
-      for (let i = i0; i <= i1; i++) {
-        const tt2 = i / fs;
-        const stPlate = (sig(tt2 - j) - sig(tt2 - stEnd)) * aST;
-        const prPlate = (sig(tt2 - prStart) - sig(tt2 - prEnd)) * aPR;
-        Vx[i] += stPlate * dST[0] + prPlate * dPR[0];
-        Vy[i] += stPlate * dST[1] + prPlate * dPR[1];
-        Vz[i] += stPlate * dST[2] + prPlate * dPR[2];
+
+      // T wave
+      addTWave(Vx, Vy, Vz, fs, qrsOn, QT, aScale, tJit, dT1, dT2, p.Taxis, beat.isPVC);
+
+      // Pericarditis ST changes (only for normal conducted beats)
+      if (dx === "Pericarditis" && !beat.isPVC && beat.pTime != null) {
+        const tau = 0.008;
+        const dST = axisDir(p.Taxis, p.zT * 0.7);
+        const dPR = axisDir(p.Paxis, 0.0);
+        function sig(tt) {
+          return 0.5 * (1 + Math.tanh(tt / tau));
+        }
+        const j = qrsOn + 0.04;
+        const stEnd = qrsOn + 0.18;
+        const prStart = beat.pTime + 0.1;
+        const prEnd = qrsOn - 0.01;
+        const aST = 0.1 * aScale;
+        const aPR = -0.04 * aScale;
+        const i0 = Math.max(0, Math.floor((beat.pTime + 0.05) * fs));
+        const i1 = Math.min(N - 1, Math.ceil((stEnd + 0.25) * fs));
+        for (let i = i0; i <= i1; i++) {
+          const tt2 = i / fs;
+          const stPlate = (sig(tt2 - j) - sig(tt2 - stEnd)) * aST;
+          const prPlate = (sig(tt2 - prStart) - sig(tt2 - prEnd)) * aPR;
+          Vx[i] += stPlate * dST[0] + prPlate * dPR[0];
+          Vy[i] += stPlate * dST[1] + prPlate * dPR[1];
+          Vz[i] += stPlate * dST[2] + prPlate * dPR[2];
+        }
       }
     }
   }

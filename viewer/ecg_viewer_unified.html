@@ -90,6 +90,19 @@
   .quiz-score.good{color:#b8860b}
   .quiz-score.needs-work{color:var(--warn)}
   .teach-highlight{background:linear-gradient(90deg,rgba(27,109,255,0.08),transparent);border-left:3px solid var(--accent);padding-left:8px}
+  .morphology-options{display:flex;flex-wrap:wrap;gap:10px}
+  .morphology-option{
+    display:flex;align-items:center;gap:6px;
+    padding:10px 16px;border:2px solid var(--border);border-radius:10px;
+    background:#fff;cursor:pointer;font-size:14px;transition:all 0.15s;
+  }
+  .morphology-option:hover{border-color:var(--accent);background:#f0f7ff}
+  .morphology-option.selected{border-color:var(--accent);background:#e8f2ff;font-weight:600}
+  .morphology-option.correct{border-color:var(--ok);background:#e5f7ec}
+  .morphology-option.incorrect{border-color:var(--warn);background:#ffe4e8}
+  .morphology-result{font-size:14px;font-weight:600;min-height:20px}
+  .morphology-result.correct{color:var(--ok)}
+  .morphology-result.incorrect{color:var(--warn)}
   @media print{
     body{margin:0;background:white;}
     .bar,.masthead{page-break-inside:avoid;box-shadow:none;}
@@ -111,7 +124,8 @@
     <select id="mode">
       <option value="view" selected>View</option>
       <option value="teach">Teach</option>
-      <option value="quiz">Quiz</option>
+      <option value="quiz">Quiz (Measurements)</option>
+      <option value="morphology">Quiz (Identify Rhythm)</option>
     </select>
   </label>
   <span class="hint" id="modeHint">View mode: explore ECG with all measurements visible.</span>
@@ -235,6 +249,16 @@
   </div>
 </div>
 
+<div class="bar morphology-bar" id="morphologyBar" style="display:none;flex-direction:column;gap:12px;width:100%">
+  <div style="font-weight:600;font-size:14px">What is this rhythm?</div>
+  <div class="morphology-options" id="morphologyOptions"></div>
+  <div class="morphology-result" id="morphologyResult"></div>
+  <div style="display:flex;gap:8px">
+    <button id="checkMorphologyBtn">Check Answer</button>
+    <button id="nextMorphologyBtn">Next Case</button>
+  </div>
+</div>
+
 <div class="bar teach-tips" id="teachTips" style="display:none;flex-direction:column;gap:8px">
   <div style="font-weight:600;font-size:13px;color:var(--accent)">Teaching Tips</div>
   <div id="tipContent" style="font-size:12px;color:var(--muted);line-height:1.5"></div>
@@ -307,6 +331,11 @@ const elRandomCase = document.getElementById("randomCase");
 const elRandomDx = document.getElementById("randomDx");
 const elTeachTips = document.getElementById("teachTips");
 const elTipContent = document.getElementById("tipContent");
+const elMorphologyBar = document.getElementById("morphologyBar");
+const elMorphologyOptions = document.getElementById("morphologyOptions");
+const elMorphologyResult = document.getElementById("morphologyResult");
+const elCheckMorphologyBtn = document.getElementById("checkMorphologyBtn");
+const elNextMorphologyBtn = document.getElementById("nextMorphologyBtn");
 
 // Quiz inputs
 const qHr = document.getElementById("q_hr");
@@ -369,8 +398,14 @@ let quizGraded = false;
 const MODE_HINTS = {
   view: "View mode: explore ECG with all measurements visible.",
   teach: "Teach mode: measurements visible with educational highlights.",
-  quiz: "Quiz mode: enter your measurements, then grade your answers."
+  quiz: "Quiz mode: enter your measurements, then grade your answers.",
+  morphology: "Identify the rhythm: select the correct diagnosis from the options."
 };
+
+// Morphology quiz state
+let currentMorphologyDx = null;
+let morphologyOptions = [];
+let morphologyAnswered = false;
 
 const TEACHING_TIPS = {
   hr: [
@@ -413,17 +448,27 @@ function setMode(mode) {
   if (mode === "quiz") {
     elMeasurementsBar.style.display = "none";
     elQuizBar.style.display = "block";
+    elMorphologyBar.style.display = "none";
     elTeachTips.style.display = "none";
     clearQuizInputs();
+  } else if (mode === "morphology") {
+    elMeasurementsBar.style.display = "none";
+    elQuizBar.style.display = "none";
+    elMorphologyBar.style.display = "flex";
+    elTeachTips.style.display = "none";
+    elMeasurementsBar.classList.remove("teach-highlight");
+    generateMorphologyQuestion();
   } else if (mode === "teach") {
     elMeasurementsBar.style.display = "block";
     elQuizBar.style.display = "none";
+    elMorphologyBar.style.display = "none";
     elTeachTips.style.display = "flex";
     elMeasurementsBar.classList.add("teach-highlight");
     showTeachingTips();
   } else {
     elMeasurementsBar.style.display = "block";
     elQuizBar.style.display = "none";
+    elMorphologyBar.style.display = "none";
     elTeachTips.style.display = "none";
     elMeasurementsBar.classList.remove("teach-highlight");
   }
@@ -557,6 +602,101 @@ function revealAnswers() {
   gAxis.textContent = m.axes?.qAxis != null ? `${Math.round(m.axes.qAxis)}°` : "N/A";
 
   [gHr, gPr, gQrs, gQt, gAxis].forEach(el => el.className = "grade-result");
+}
+
+// Morphology quiz functions
+function generateMorphologyQuestion() {
+  if (!META || !META.targets) return;
+
+  const correctDx = META.targets.dx || "Normal sinus";
+  currentMorphologyDx = correctDx;
+  morphologyAnswered = false;
+  elMorphologyResult.textContent = "";
+  elMorphologyResult.className = "morphology-result";
+
+  // Generate distractors (wrong answers) from available diagnoses
+  const distractors = DIAGNOSES.filter(dx => dx !== correctDx);
+  shuffleArray(distractors);
+
+  // Pick 3 distractors + correct answer = 4 options
+  const selectedDistractors = distractors.slice(0, 3);
+  morphologyOptions = [correctDx, ...selectedDistractors];
+  shuffleArray(morphologyOptions);
+
+  // Render options
+  elMorphologyOptions.innerHTML = "";
+  morphologyOptions.forEach((dx, idx) => {
+    const opt = document.createElement("div");
+    opt.className = "morphology-option";
+    opt.dataset.dx = dx;
+    opt.innerHTML = `<input type="radio" name="morphology" id="morph_${idx}" value="${dx}"><label for="morph_${idx}">${dx}</label>`;
+    opt.onclick = () => selectMorphologyOption(dx);
+    elMorphologyOptions.appendChild(opt);
+  });
+}
+
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function selectMorphologyOption(dx) {
+  if (morphologyAnswered) return;
+
+  // Clear previous selection
+  document.querySelectorAll(".morphology-option").forEach(el => {
+    el.classList.remove("selected");
+    el.querySelector("input").checked = false;
+  });
+
+  // Select clicked option
+  const opt = document.querySelector(`.morphology-option[data-dx="${dx}"]`);
+  if (opt) {
+    opt.classList.add("selected");
+    opt.querySelector("input").checked = true;
+  }
+}
+
+function checkMorphologyAnswer() {
+  if (morphologyAnswered) return;
+
+  const selected = document.querySelector(".morphology-option.selected");
+  if (!selected) {
+    elMorphologyResult.textContent = "Please select an answer first.";
+    elMorphologyResult.className = "morphology-result";
+    return;
+  }
+
+  const userAnswer = selected.dataset.dx;
+  morphologyAnswered = true;
+
+  // Mark correct/incorrect
+  document.querySelectorAll(".morphology-option").forEach(el => {
+    const dx = el.dataset.dx;
+    if (dx === currentMorphologyDx) {
+      el.classList.add("correct");
+    } else if (dx === userAnswer && userAnswer !== currentMorphologyDx) {
+      el.classList.add("incorrect");
+    }
+  });
+
+  if (userAnswer === currentMorphologyDx) {
+    elMorphologyResult.textContent = "Correct! Well done.";
+    elMorphologyResult.className = "morphology-result correct";
+  } else {
+    elMorphologyResult.textContent = `Incorrect. The answer is: ${currentMorphologyDx}`;
+    elMorphologyResult.className = "morphology-result incorrect";
+  }
+}
+
+function nextMorphologyCase() {
+  // Generate a new random case and reset the quiz
+  generateNewCase();
+  setTimeout(() => {
+    generateMorphologyQuestion();
+  }, 100);
 }
 
 function loadCasePack(packId) {
@@ -1065,6 +1205,8 @@ elNextCase.onclick = ()=>{
   }
 };
 elRandomCase.onclick = generateNewCase;
+elCheckMorphologyBtn.onclick = checkMorphologyAnswer;
+elNextMorphologyBtn.onclick = nextMorphologyCase;
 
 function exportPrintSnapshot(){
   if(!META) return;

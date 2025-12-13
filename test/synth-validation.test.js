@@ -11,6 +11,20 @@ import {
 } from "../viewer/js/ecg-core.js";
 import { synthECG, DIAGNOSES, ageDefaults, applyDx } from "../viewer/js/ecg-synth.js";
 
+// New diagnoses added in M6
+const NEW_DIAGNOSES = [
+  "LBBB",
+  "LAFB",
+  "1st degree AVB",
+  "2nd degree AVB (Wenckebach)",
+  "2nd degree AVB (Mobitz II)",
+  "3rd degree AVB",
+  "PACs",
+  "PVCs",
+  "Sinus bradycardia",
+  "Sinus tachycardia",
+];
+
 function approx(actual, expected, tolerance, label = "value") {
   if (expected == null) return; // skip if no expected value
   assert.ok(Number.isFinite(actual), `${label} not finite: ${actual}`);
@@ -157,6 +171,72 @@ async function run() {
   // With noise, Einthoven error can be higher but should still be reasonable
   assert.ok(integrity.einthoven_max_abs_error_uV <= 50, `Noisy Einthoven error ${integrity.einthoven_max_abs_error_uV} > 50 µV`);
   console.log(`  Noisy ECG Einthoven error: ${integrity.einthoven_max_abs_error_uV} µV (acceptable)`);
+
+  // Test 6: New M6 diagnoses
+  console.log("\nTest 6: New rhythm abnormalities (M6)");
+
+  // LBBB: wide QRS, left axis
+  const lbbb = synthECG(8, "LBBB", 42, false, true);
+  const lbbbParams = applyDx(ageDefaults(8), "LBBB");
+  testEinthovenIntegrity(lbbb, "LBBB");
+  testQRS(lbbb, lbbbParams.QRS * 1000, 30, "LBBB");
+  console.log(`  LBBB: OK (QRS=${Math.round(lbbbParams.QRS * 1000)}ms, axis=${lbbbParams.QRSaxis}°)`);
+
+  // LAFB: marked left axis deviation
+  const lafb = synthECG(8, "LAFB", 42, false, true);
+  const lafbParams = applyDx(ageDefaults(8), "LAFB");
+  testEinthovenIntegrity(lafb, "LAFB");
+  testAxis(lafb, lafbParams.QRSaxis, 25, "LAFB");
+  console.log(`  LAFB: OK (axis=${lafbParams.QRSaxis}° expected marked LAD)`);
+
+  // 1st degree AVB: prolonged PR
+  const avb1 = synthECG(8, "1st degree AVB", 42, false, true);
+  const avb1Params = applyDx(ageDefaults(8), "1st degree AVB");
+  testEinthovenIntegrity(avb1, "1st degree AVB");
+  console.log(`  1st degree AVB: OK (PR=${Math.round(avb1Params.PR * 1000)}ms expected prolonged)`);
+
+  // 2nd degree AVB (Wenckebach): should have dropped beats
+  const wencke = synthECG(8, "2nd degree AVB (Wenckebach)", 42, false, true);
+  testEinthovenIntegrity(wencke, "Wenckebach");
+  const { rPeaks: wPeaks } = analyze(wencke);
+  assert.ok(wPeaks.length >= 4, `Wenckebach: should have beats, got ${wPeaks.length}`);
+  console.log(`  2nd degree AVB (Wenckebach): OK (${wPeaks.length} conducted beats)`);
+
+  // 3rd degree AVB: complete heart block with escape rhythm
+  const avb3 = synthECG(8, "3rd degree AVB", 42, false, true);
+  testEinthovenIntegrity(avb3, "3rd degree AVB");
+  const { rPeaks: avb3Peaks, measures: avb3M } = analyze(avb3);
+  // Escape rhythm should be ~40 bpm
+  assert.ok(avb3M.hr > 30 && avb3M.hr < 60, `3rd degree AVB: HR ${avb3M.hr} should be 30-60 (escape)`);
+  console.log(`  3rd degree AVB: OK (HR=${Math.round(avb3M.hr)} escape rhythm)`);
+
+  // PACs: should have extra beats
+  const pacs = synthECG(8, "PACs", 42, false, true);
+  testEinthovenIntegrity(pacs, "PACs");
+  const { rPeaks: pacPeaks } = analyze(pacs);
+  assert.ok(pacPeaks.length >= 10, `PACs: should have extra beats, got ${pacPeaks.length}`);
+  console.log(`  PACs: OK (${pacPeaks.length} beats including premature)`);
+
+  // PVCs: should have wide complex beats
+  const pvcs = synthECG(8, "PVCs", 42, false, true);
+  testEinthovenIntegrity(pvcs, "PVCs");
+  const { rPeaks: pvcPeaks } = analyze(pvcs);
+  assert.ok(pvcPeaks.length >= 10, `PVCs: should have beats, got ${pvcPeaks.length}`);
+  console.log(`  PVCs: OK (${pvcPeaks.length} beats including PVCs)`);
+
+  // Sinus bradycardia
+  const brady = synthECG(8, "Sinus bradycardia", 42, false, true);
+  const bradyParams = applyDx(ageDefaults(8), "Sinus bradycardia");
+  testEinthovenIntegrity(brady, "Sinus bradycardia");
+  testHR(brady, bradyParams.HR, 15, "Sinus bradycardia");
+  console.log(`  Sinus bradycardia: OK (HR=${Math.round(bradyParams.HR)} expected slow)`);
+
+  // Sinus tachycardia
+  const tachy = synthECG(8, "Sinus tachycardia", 42, false, true);
+  const tachyParams = applyDx(ageDefaults(8), "Sinus tachycardia");
+  testEinthovenIntegrity(tachy, "Sinus tachycardia");
+  testHR(tachy, tachyParams.HR, 20, "Sinus tachycardia");
+  console.log(`  Sinus tachycardia: OK (HR=${Math.round(tachyParams.HR)} expected fast)`);
 
   console.log("\n✓ All synth validation tests passed!");
 }
