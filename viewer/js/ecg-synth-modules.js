@@ -1,15 +1,26 @@
 // ECG Synthesis Modules - Teaching-Indistinguishable Architecture
-// Step 1: Refactored into 5 explicit modules for independent testing and swapping
+// Modular synthesizer for generating pediatric and adult ECGs
+//
+// MODULE INDEX (use Ctrl+G in editor to jump to line):
+// ┌───────────────────────────────────────────────────────────────────────────┐
+// │ SECTION                     │ LINE  │ KEY EXPORTS                        │
+// ├───────────────────────────────────────────────────────────────────────────┤
+// │ UTILITIES                   │   30  │ norm, axisDir, mulberry32, randn   │
+// │ PEDIATRIC PRIORS           │   55  │ PEDIATRIC_PRIORS, getAgeBin,       │
+// │                            │       │ samplePediatricPriors              │
+// │ DIAGNOSES                  │  250  │ DIAGNOSES, ageDefaults, applyDx    │
+// │ WAVE FUNCTIONS             │  365  │ gaussianWave, hermiteQRS,          │
+// │                            │       │ WAVE_PRESETS                       │
+// │ HRV PARAMETERS             │  660  │ getHRVParams, modulateRR,          │
+// │                            │       │ EctopyStateMachine, rhythmModel    │
+// │ BEAT JITTER                │ 1040  │ generateBeatJitter                 │
+// │ MORPHOLOGY MODEL           │ 1300  │ morphologyModel                    │
+// │ LEAD FIELD MODEL           │ 1460  │ leadFieldModel, deriveLeads        │
+// │ DEVICE/FILTERS             │ 1700  │ DEVICE_PRESETS, ARTIFACT_PRESETS   │
+// │ MAIN SYNTHESIZER           │ 2300  │ synthECGModular                    │
+// └───────────────────────────────────────────────────────────────────────────┘
+//
 import { ECG_SCHEMA_VERSION, clamp, lerp } from "./ecg-core.js";
-
-// Template-based morphology (feature-flagged)
-import {
-  USE_TEMPLATES,
-  templatesReady,
-  getTemplateWaveform,
-  addTemplateToVCG,
-  loadTemplateLibrary
-} from "./ecg-templates.js";
 
 // ============================================================================
 // UTILITIES
@@ -228,6 +239,115 @@ export function checkNormalLimits(param, value, ageY, zLimit = 2) {
     zScore: z,
     interpretation,
   };
+}
+
+// ============================================================================
+// DIAGNOSES AND PARAMETER MODIFIERS
+// ============================================================================
+
+export const DIAGNOSES = [
+  "Normal sinus",
+  "WPW",
+  "RBBB",
+  "LBBB",
+  "LAFB",
+  "LVH",
+  "RVH",
+  "SVT (narrow)",
+  "Atrial flutter (2:1)",
+  "1st degree AVB",
+  "2nd degree AVB (Wenckebach)",
+  "2nd degree AVB (Mobitz II)",
+  "3rd degree AVB",
+  "Long QT",
+  "Pericarditis",
+  "PACs",
+  "PVCs",
+  "Sinus bradycardia",
+  "Sinus tachycardia",
+];
+
+// Age anchors for parameter interpolation
+const AGE_ANCHORS = [
+  { age: 0.0, HR: 140, PR: 0.1, QRS: 0.065, QTc: 0.41, Paxis: 65, QRSaxis: 125, Taxis: 85, rvDom: 1.0, juvenileT: 1.0, zQ2: 0.75, zT: -0.6 },
+  { age: 1.0, HR: 120, PR: 0.11, QRS: 0.07, QTc: 0.41, Paxis: 60, QRSaxis: 105, Taxis: 70, rvDom: 0.85, juvenileT: 0.9, zQ2: 0.65, zT: -0.55 },
+  { age: 4.0, HR: 100, PR: 0.12, QRS: 0.07, QTc: 0.41, Paxis: 60, QRSaxis: 75, Taxis: 50, rvDom: 0.65, juvenileT: 0.75, zQ2: 0.55, zT: -0.45 },
+  { age: 8.0, HR: 85, PR: 0.14, QRS: 0.08, QTc: 0.41, Paxis: 55, QRSaxis: 60, Taxis: 45, rvDom: 0.45, juvenileT: 0.5, zQ2: 0.45, zT: -0.32 },
+  { age: 16.0, HR: 70, PR: 0.16, QRS: 0.09, QTc: 0.41, Paxis: 55, QRSaxis: 50, Taxis: 40, rvDom: 0.25, juvenileT: 0.2, zQ2: 0.35, zT: -0.18 },
+];
+
+function interpAnchors(age, anchors, key) {
+  if (age <= anchors[0].age) return anchors[0][key];
+  if (age >= anchors[anchors.length - 1].age) return anchors[anchors.length - 1][key];
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const A = anchors[i], B = anchors[i + 1];
+    if (age >= A.age && age <= B.age) {
+      const u = (age - A.age) / (B.age - A.age);
+      return lerp(A[key], B[key], u);
+    }
+  }
+  return anchors[0][key];
+}
+
+export function ageDefaults(ageY) {
+  ageY = clamp(ageY, 0, 25);
+  return {
+    HR: interpAnchors(ageY, AGE_ANCHORS, "HR"),
+    PR: interpAnchors(ageY, AGE_ANCHORS, "PR"),
+    QRS: interpAnchors(ageY, AGE_ANCHORS, "QRS"),
+    QTc: interpAnchors(ageY, AGE_ANCHORS, "QTc"),
+    Paxis: interpAnchors(ageY, AGE_ANCHORS, "Paxis"),
+    QRSaxis: interpAnchors(ageY, AGE_ANCHORS, "QRSaxis"),
+    Taxis: interpAnchors(ageY, AGE_ANCHORS, "Taxis"),
+    rvDom: interpAnchors(ageY, AGE_ANCHORS, "rvDom"),
+    juvenileT: interpAnchors(ageY, AGE_ANCHORS, "juvenileT"),
+    zQ2: interpAnchors(ageY, AGE_ANCHORS, "zQ2"),
+    zT: interpAnchors(ageY, AGE_ANCHORS, "zT"),
+  };
+}
+
+export function applyDx(p, dx) {
+  const q = { ...p };
+  if (dx === "WPW") {
+    q.PR = Math.max(0.08, p.PR - 0.04);
+    q.QRS = Math.min(0.12, p.QRS + 0.04);
+  }
+  if (dx === "RBBB") {
+    q.QRS = Math.min(0.14, p.QRS + 0.04);
+  }
+  if (dx === "LBBB") {
+    q.QRS = Math.min(0.16, p.QRS + 0.06);
+    q.QRSaxis = Math.max(-45, p.QRSaxis - 40);
+  }
+  if (dx === "LAFB") {
+    q.QRSaxis = Math.max(-60, p.QRSaxis - 50);
+  }
+  if (dx === "LVH") {
+    q.QRSaxis = Math.max(-30, p.QRSaxis - 35);
+  }
+  if (dx === "RVH") {
+    q.QRSaxis = Math.min(170, p.QRSaxis + 35);
+    q.rvDom = Math.min(1.2, p.rvDom + 0.25);
+  }
+  if (dx === "SVT (narrow)") {
+    q.HR = Math.max(150, Math.min(230, p.HR * 1.9));
+  }
+  if (dx === "Atrial flutter (2:1)") {
+    q.HR = Math.max(120, Math.min(180, p.HR * 1.5));
+  }
+  if (dx === "1st degree AVB") {
+    q.PR = Math.min(0.28, p.PR + 0.08);
+  }
+  if (dx === "Long QT") {
+    q.QTc = 0.5;
+  }
+  if (dx === "Sinus bradycardia") {
+    q.HR = Math.max(40, Math.min(60, p.HR * 0.6));
+  }
+  if (dx === "Sinus tachycardia") {
+    q.HR = Math.max(100, Math.min(150, p.HR * 1.4));
+  }
+  return q;
 }
 
 // ============================================================================
@@ -1242,72 +1362,46 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
     const dT1j = applyDirJitter(dT1, jitter.dirJitter);
     const dT2j = applyDirJitter(dT2, jitter.dirJitter);
 
-    // P wave with enhanced jitter (template or parametric)
+    // P wave with enhanced jitter
     if (beat.hasPWave && beat.pTime != null) {
       const pCenter = beat.pTime + 0.04 + jitter.timeJitterP;
       const pAmp = jitter.ampJitter * jitter.pAmpFactor;
-
-      // Try template-based generation first (if enabled)
-      const usedTemplate = USE_TEMPLATES && addPWaveTemplate(
-        Vx, Vy, Vz, fs, pCenter, pAmp, dx, ageY, dP1j, rng
-      );
-
-      // Fall back to parametric generation
-      if (!usedTemplate) {
-        addPWaveJittered(Vx, Vy, Vz, fs, pCenter, pAmp, jitter.pDurationFactor, dP1j, dP2j);
-      }
+      addPWaveJittered(Vx, Vy, Vz, fs, pCenter, pAmp, jitter.pDurationFactor, dP1j, dP2j);
     }
 
-    // QRS complex with enhanced jitter (template or parametric)
+    // QRS complex with enhanced jitter
     if (beat.hasQRS && beat.qrsTime != null) {
       const qrsOn = beat.qrsTime + jitter.timeJitterQRS;
       const qrsWidth = params.QRS * jitter.qrsDurationFactor;
       const qrsC = qrsOn + qrsWidth / 2;
 
-      // Try template-based QRS generation first (if enabled)
-      const usedQRSTemplate = USE_TEMPLATES && addQRSTemplate(
-        Vx, Vy, Vz, fs, qrsOn, qrsWidth, jitter.ampJitter, dx, ageY, dQ2j, beat.isPVC, rng
-      );
+      addQRSJittered(Vx, Vy, Vz, fs, qrsOn, qrsC, params, jitter, dQ1j, dQ2j, dQ3j, dx, beat.isPVC, rng);
 
-      // Fall back to parametric generation
-      if (!usedQRSTemplate) {
-        addQRSJittered(Vx, Vy, Vz, fs, qrsOn, qrsC, params, jitter, dQ1j, dQ2j, dQ3j, dx, beat.isPVC, rng);
-
-        // Morphology modifiers with jitter (only for parametric)
-        if (!beat.isPVC) {
-          if (dx === "WPW") {
-            const dDelta = norm([dQ1j[0] * 0.6 + dQ2j[0] * 0.4, dQ1j[1] * 0.6 + dQ2j[1] * 0.4, dQ1j[2] * 0.6 + dQ2j[2] * 0.4]);
-            addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + jitter.timeJitterQRS, 0.022, 0.28 * jitter.ampJitter, dDelta);
-          }
-          if (dx === "RBBB") {
-            const dLate = applyDirJitter(norm([-0.9, 0.0, 0.95]), jitter.dirJitter);
-            addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * qrsWidth, 0.01 + 0.08 * qrsWidth, 0.35 * jitter.ampJitter, dLate);
-          }
-          if (dx === "LVH") {
-            addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.16 * qrsWidth, 0.55 * jitter.ampJitter, axisDir(params.QRSaxis - 20, params.zQ2 * 0.8));
-          }
-          if (dx === "RVH") {
-            addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.14 * qrsWidth, 0.45 * jitter.ampJitter, applyDirJitter(norm([-0.75, 0.2, 0.95]), jitter.dirJitter));
-          }
-          if (dx === "LAFB") {
-            addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * qrsWidth, 0.08 * qrsWidth, 0.15 * jitter.ampJitter, applyDirJitter(norm([0.9, -0.3, 0.1]), jitter.dirJitter));
-          }
+      // Morphology modifiers with jitter
+      if (!beat.isPVC) {
+        if (dx === "WPW") {
+          const dDelta = norm([dQ1j[0] * 0.6 + dQ2j[0] * 0.4, dQ1j[1] * 0.6 + dQ2j[1] * 0.4, dQ1j[2] * 0.6 + dQ2j[2] * 0.4]);
+          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + jitter.timeJitterQRS, 0.022, 0.28 * jitter.ampJitter, dDelta);
+        }
+        if (dx === "RBBB") {
+          const dLate = applyDirJitter(norm([-0.9, 0.0, 0.95]), jitter.dirJitter);
+          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * qrsWidth, 0.01 + 0.08 * qrsWidth, 0.35 * jitter.ampJitter, dLate);
+        }
+        if (dx === "LVH") {
+          addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.16 * qrsWidth, 0.55 * jitter.ampJitter, axisDir(params.QRSaxis - 20, params.zQ2 * 0.8));
+        }
+        if (dx === "RVH") {
+          addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.14 * qrsWidth, 0.45 * jitter.ampJitter, applyDirJitter(norm([-0.75, 0.2, 0.95]), jitter.dirJitter));
+        }
+        if (dx === "LAFB") {
+          addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * qrsWidth, 0.08 * qrsWidth, 0.15 * jitter.ampJitter, applyDirJitter(norm([0.9, -0.3, 0.1]), jitter.dirJitter));
         }
       }
 
-      // T wave with enhanced jitter (template or parametric)
+      // T wave with enhanced jitter
       const tAmp = jitter.ampJitter * jitter.tAmpFactor;
       const tDur = jitter.tDurationFactor;
-
-      // Try template-based T wave generation first (if enabled)
-      const usedTTemplate = USE_TEMPLATES && addTWaveTemplate(
-        Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, dx, ageY, dT1j, beat.isPVC, rng
-      );
-
-      // Fall back to parametric generation
-      if (!usedTTemplate) {
-        addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, jitter.timeJitterT, dT1j, dT2j, params.Taxis, beat.isPVC);
-      }
+      addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, jitter.timeJitterT, dT1j, dT2j, params.Taxis, beat.isPVC);
 
       // Pericarditis ST changes
       if (dx === "Pericarditis" && !beat.isPVC && beat.pTime != null) {
@@ -2176,8 +2270,6 @@ export function deviceAndArtifactModel(phi, fs, seed, artifactParams = ARTIFACT_
 // INTEGRATED SYNTHESIS FUNCTION (using all modules)
 // ============================================================================
 
-import { ageDefaults, applyDx, DIAGNOSES } from "./ecg-synth.js";
-
 export function synthECGModular(ageY, dx, seed, options = {}) {
   const {
     enableNoise = true,
@@ -2260,6 +2352,3 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     leads_uV,
   };
 }
-
-// Re-export for convenience
-export { DIAGNOSES, ageDefaults, applyDx };

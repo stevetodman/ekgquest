@@ -15,8 +15,8 @@ import {
 import {
   synthECGModular,
   getHRVParams,
+  DIAGNOSES,
 } from "../viewer/js/ecg-synth-modules.js";
-import { DIAGNOSES } from "../viewer/js/ecg-synth.js";
 
 // Configuration
 const POPULATION_SIZE = 50; // Cases per age/dx combination for population tests

@@ -52,8 +52,11 @@ import {
   checkNormalLimits,
   // Beat-to-beat jitter
   generateBeatJitter,
+  // Diagnoses and parameter modifiers
+  ageDefaults,
+  applyDx,
+  DIAGNOSES,
 } from "../viewer/js/ecg-synth-modules.js";
-import { ageDefaults, applyDx, DIAGNOSES } from "../viewer/js/ecg-synth.js";
 import { normalizeECGData, detectRPeaks, physicsChecks } from "../viewer/js/ecg-core.js";
 
 const fs = 1000;

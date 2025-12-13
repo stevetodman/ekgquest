@@ -18,29 +18,22 @@ open http://localhost:8000/viewer/ekgquest_lab.html
 
 ```
 ekgquest/
-├── viewer/                    # Browser-based ECG viewers
+├── viewer/
 │   ├── js/
-│   │   ├── ecg-core.js       # Core utilities: normalization, R-peak detection, measurements
-│   │   ├── ecg-synth.js      # Synthesis engine coordinator
-│   │   ├── ecg-synth-modules.js  # Modular morphology generation
-│   │   ├── ecg-templates.js  # Template-based morphology engine
-│   │   └── ecg-worker.js     # Web Worker for off-thread analysis
-│   ├── ekgquest_lab.html     # ⭐ Flagship teaching lab (recommended)
-│   ├── ecg_synth_viewer_*.html   # Legacy synthesizer viewer
-│   └── ecg_viewer_unified.html   # Stacked/print layouts, file loader
+│   │   ├── ecg-core.js           # Core utilities, R-peak detection, measurements
+│   │   ├── ecg-synth-modules.js  # ECG synthesizer (all-in-one)
+│   │   └── ecg-worker.js         # Web Worker for off-thread analysis
+│   └── ekgquest_lab.html         # ⭐ Teaching lab (viewer + synthesizer)
 ├── python/
-│   └── realism_lab/          # Validation toolkit
-│       ├── metrics.py        # Physics, distribution, spectral metrics
-│       ├── eval_realism.py   # Evaluation pipeline
+│   └── realism_lab/              # Validation toolkit
+│       ├── metrics.py            # Physics, distribution, spectral metrics
+│       ├── eval_realism.py       # Evaluation pipeline
 │       ├── pediatric_reference.py  # Rijnbeek 2001 norms
-│       └── ptbxl_reference.py      # PTB-XL adult reference
-├── test/                     # JavaScript tests
-├── tools/                    # Build/CI tools
-├── data/                     # Sample ECG files
-└── docs/                     # Detailed documentation
-    ├── ARCHITECTURE.md       # System design
-    ├── SYNTHESIZER.md        # Synthesis engine deep dive
-    └── REALISM_LAB.md        # Validation methodology
+│       └── ptbxl_reference.py    # PTB-XL adult reference
+├── data/
+│   └── pediatric_priors.json     # Age-specific ECG norms (source of truth)
+├── test/                         # JavaScript tests
+└── docs/                         # Documentation
 ```
 
 ## Key Features
@@ -56,7 +49,6 @@ ekgquest/
 - **19 diagnoses**: Normal sinus, WPW, RBBB, LBBB, LAFB, LVH, RVH, SVT, Atrial flutter, AVB (1st/2nd/3rd degree), Long QT, Pericarditis, PACs, PVCs, Sinus brady/tachy
 - **Age-appropriate physiology**: Validated against Rijnbeek 2001 pediatric norms (0-16 years)
 - **Beat-to-beat variation**: Respiratory modulation, amplitude jitter, timing variability
-- **Template morphology**: Feature-flagged real-waveform templates for enhanced realism
 - **Physics consistency**: Einthoven's law enforced on limb leads
 - **Reproducible**: Deterministic output with seed control
 
