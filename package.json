@@ -3,13 +3,26 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test/smoke.test.js && node test/golden.test.js && node test/validation.test.js && node test/measurement.test.js && node test/synth-modules.test.js && node test/synth_population.test.js && node test/golden_regression.test.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{js,mjs,json,md,html,css}\"",
+    "format:check": "prettier --check \"**/*.{js,mjs,json,md,html,css}\"",
+    "start": "node dev-server.mjs",
     "test:visual": "node tools/visual-regression.mjs --check",
     "test:visual:update": "node tools/visual-regression.mjs --update"
   },
   "devDependencies": {
-    "puppeteer": "^21.0.0",
+    "@eslint/js": "^9.15.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "eslint": "^9.15.0",
+    "globals": "^15.12.0",
     "pixelmatch": "^5.3.0",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "prettier": "^3.4.0",
+    "puppeteer": "^21.0.0",
+    "vitest": "^2.1.0"
   }
 }

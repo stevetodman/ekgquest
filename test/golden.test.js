@@ -1,6 +1,6 @@
-import assert from "assert";
-import fs from "fs/promises";
-
+import { describe, it } from 'vitest';
+import assert from 'assert';
+import fs from 'fs/promises';
 import {
   normalizeECGData,
   detectRPeaks,
@@ -9,7 +9,7 @@ import {
   fiducialsFromMedian,
   buildFullFiducialsFromMedian,
   computeGlobalMeasurements,
-} from "../viewer/js/ecg-core.js";
+} from '../viewer/js/ecg-core.js';
 
 function approx(actual, expected, tol) {
   assert.ok(Number.isFinite(actual), `actual not finite: ${actual}`);
@@ -17,13 +17,13 @@ function approx(actual, expected, tol) {
 }
 
 async function loadJSON(relativePath) {
-  return JSON.parse(await fs.readFile(new URL(relativePath, import.meta.url), "utf8"));
+  return JSON.parse(await fs.readFile(new URL(relativePath, import.meta.url), 'utf8'));
 }
 
 function analyze(meta) {
   const rPeaks = detectRPeaks(meta);
   const medBeat = buildMedianBeat(meta, rPeaks, 0.25, 0.55);
-  assert.ok(medBeat.ok, medBeat.reason || "median beat failed");
+  assert.ok(medBeat.ok, medBeat.reason || 'median beat failed');
 
   let rrMean = null;
   if (rPeaks.length >= 2) {
@@ -37,24 +37,18 @@ function analyze(meta) {
   return { rPeaks, fiducials, measures };
 }
 
-async function run() {
-  const golden = await loadJSON("./golden.json");
+describe('Golden Tests', () => {
+  it('should match golden expectations for all cases', async () => {
+    const golden = await loadJSON('./golden.json');
 
-  for (const c of golden.cases) {
-    const raw = await loadJSON(c.path);
-    const meta = normalizeECGData(raw);
-    const res = analyze(meta);
+    for (const c of golden.cases) {
+      const raw = await loadJSON(c.path);
+      const meta = normalizeECGData(raw);
+      const res = analyze(meta);
 
-    assert.strictEqual(res.rPeaks.length, c.expect.rPeaks, `${c.name}: rPeaks`);
-    approx(res.measures.hr, c.expect.hr_bpm, 0.5);
-    approx(res.measures.QRS, c.expect.qrs_ms, 10);
-
-    console.log("golden ok:", c.name);
-  }
-}
-
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
+      assert.strictEqual(res.rPeaks.length, c.expect.rPeaks, `${c.name}: rPeaks`);
+      approx(res.measures.hr, c.expect.hr_bpm, 0.5);
+      approx(res.measures.QRS, c.expect.qrs_ms, 10);
+    }
+  });
 });
-

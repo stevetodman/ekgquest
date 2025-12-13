@@ -26,6 +26,7 @@ Thumbs.db
 python/outputs/
 test/visual/output/
 test/visual/diff/
+coverage/
 
 # Local settings
 .env

@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+python/
+releases/
+data/
+*.min.js
+package-lock.json

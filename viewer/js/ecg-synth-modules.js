@@ -60,7 +60,7 @@ export function randn(rng) {
 // ============================================================================
 
 /**
- * Pediatric ECG normal value priors
+ * ECG normal value priors (pediatric through adult)
  *
  * SOURCE OF TRUTH: /data/pediatric_priors.json
  *
@@ -68,24 +68,24 @@ export function randn(rng) {
  * Python validation uses the JSON directly to prevent drift.
  * If updating values, modify the JSON first, then update this copy.
  *
- * Based on: Rijnbeek et al. 2001/2014, Bratincsák et al. 2020, Davignon et al. 1979
+ * Sources: Rijnbeek et al. 2001/2014, Bratincsák et al. 2020, Davignon et al. 1979
  */
 export const PEDIATRIC_PRIORS = {
   age_bins: [
     { id: "neonate", age_range: [0, 0.08], HR: { mean: 145, sd: 22 }, PR: { mean: 0.100, sd: 0.015 }, QRS: { mean: 0.060, sd: 0.008 }, QTc: { mean: 0.400, sd: 0.025 }, QRSaxis: { mean: 125, sd: 35 }, Taxis: { mean: 85, sd: 40 }, Paxis: { mean: 60, sd: 20 } },
     { id: "infant_early", age_range: [0.08, 0.25], HR: { mean: 150, sd: 20 }, PR: { mean: 0.105, sd: 0.015 }, QRS: { mean: 0.062, sd: 0.008 }, QTc: { mean: 0.400, sd: 0.025 }, QRSaxis: { mean: 100, sd: 35 }, Taxis: { mean: 70, sd: 35 }, Paxis: { mean: 58, sd: 18 } },
     { id: "infant_mid", age_range: [0.25, 0.5], HR: { mean: 140, sd: 20 }, PR: { mean: 0.110, sd: 0.018 }, QRS: { mean: 0.065, sd: 0.008 }, QTc: { mean: 0.405, sd: 0.025 }, QRSaxis: { mean: 85, sd: 35 }, Taxis: { mean: 55, sd: 30 }, Paxis: { mean: 55, sd: 18 } },
-    { id: "infant_late", age_range: [0.5, 1.0], HR: { mean: 130, sd: 18 }, PR: { mean: 0.115, sd: 0.020 }, QRS: { mean: 0.068, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.025 }, QRSaxis: { mean: 75, sd: 35 }, Taxis: { mean: 50, sd: 28 }, Paxis: { mean: 55, sd: 18 } },
-    { id: "toddler", age_range: [1.0, 3.0], HR: { mean: 115, sd: 18 }, PR: { mean: 0.120, sd: 0.020 }, QRS: { mean: 0.070, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.025 }, QRSaxis: { mean: 65, sd: 30 }, Taxis: { mean: 45, sd: 25 }, Paxis: { mean: 55, sd: 16 } },
-    { id: "preschool", age_range: [3.0, 5.0], HR: { mean: 100, sd: 15 }, PR: { mean: 0.130, sd: 0.022 }, QRS: { mean: 0.072, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.022 }, QRSaxis: { mean: 60, sd: 28 }, Taxis: { mean: 40, sd: 22 }, Paxis: { mean: 52, sd: 15 } },
-    { id: "school_early", age_range: [5.0, 8.0], HR: { mean: 90, sd: 14 }, PR: { mean: 0.140, sd: 0.024 }, QRS: { mean: 0.076, sd: 0.010 }, QTc: { mean: 0.410, sd: 0.022 }, QRSaxis: { mean: 58, sd: 26 }, Taxis: { mean: 38, sd: 20 }, Paxis: { mean: 50, sd: 15 } },
-    { id: "school_late", age_range: [8.0, 12.0], HR: { mean: 80, sd: 12 }, PR: { mean: 0.150, sd: 0.026 }, QRS: { mean: 0.080, sd: 0.010 }, QTc: { mean: 0.410, sd: 0.020 }, QRSaxis: { mean: 55, sd: 25 }, Taxis: { mean: 38, sd: 18 }, Paxis: { mean: 50, sd: 14 } },
-    { id: "adolescent", age_range: [12.0, 16.0], HR: { mean: 75, sd: 12 }, PR: { mean: 0.155, sd: 0.028 }, QRS: { mean: 0.085, sd: 0.012 }, QTc: { mean: 0.410, sd: 0.020 }, QRSaxis: { mean: 52, sd: 24 }, Taxis: { mean: 38, sd: 18 }, Paxis: { mean: 50, sd: 14 } },
-    { id: "young_adult", age_range: [16.0, 100.0], HR: { mean: 70, sd: 12 }, PR: { mean: 0.160, sd: 0.028 }, QRS: { mean: 0.090, sd: 0.012 }, QTc: { mean: 0.410, sd: 0.020 }, QRSaxis: { mean: 50, sd: 30 }, Taxis: { mean: 40, sd: 20 }, Paxis: { mean: 50, sd: 15 } },
+    { id: "infant_late", age_range: [0.5, 1.0], HR: { mean: 130, sd: 18 }, PR: { mean: 0.115, sd: 0.020 }, QRS: { mean: 0.068, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.025 }, QRSaxis: { mean: 75, sd: 35 }, Taxis: { mean: 50, sd: 25 }, Paxis: { mean: 52, sd: 15 } },
+    { id: "toddler", age_range: [1.0, 3.0], HR: { mean: 115, sd: 18 }, PR: { mean: 0.120, sd: 0.020 }, QRS: { mean: 0.070, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.025 }, QRSaxis: { mean: 65, sd: 30 }, Taxis: { mean: 45, sd: 25 }, Paxis: { mean: 50, sd: 15 } },
+    { id: "preschool", age_range: [3.0, 6.0], HR: { mean: 100, sd: 15 }, PR: { mean: 0.130, sd: 0.022 }, QRS: { mean: 0.075, sd: 0.010 }, QTc: { mean: 0.415, sd: 0.025 }, QRSaxis: { mean: 60, sd: 25 }, Taxis: { mean: 40, sd: 20 }, Paxis: { mean: 48, sd: 12 } },
+    { id: "school", age_range: [6.0, 12.0], HR: { mean: 85, sd: 15 }, PR: { mean: 0.140, sd: 0.025 }, QRS: { mean: 0.080, sd: 0.012 }, QTc: { mean: 0.420, sd: 0.025 }, QRSaxis: { mean: 55, sd: 25 }, Taxis: { mean: 38, sd: 18 }, Paxis: { mean: 45, sd: 12 } },
+    { id: "adolescent", age_range: [12.0, 18.0], HR: { mean: 75, sd: 12 }, PR: { mean: 0.150, sd: 0.028 }, QRS: { mean: 0.085, sd: 0.012 }, QTc: { mean: 0.420, sd: 0.025 }, QRSaxis: { mean: 55, sd: 25 }, Taxis: { mean: 35, sd: 18 }, Paxis: { mean: 45, sd: 12 } },
+    { id: "young_adult", age_range: [18.0, 40.0], HR: { mean: 72, sd: 12 }, PR: { mean: 0.160, sd: 0.030 }, QRS: { mean: 0.090, sd: 0.012 }, QTc: { mean: 0.420, sd: 0.025 }, QRSaxis: { mean: 50, sd: 30 }, Taxis: { mean: 35, sd: 20 }, Paxis: { mean: 45, sd: 15 } },
+    { id: "adult", age_range: [40.0, 150.0], HR: { mean: 70, sd: 12 }, PR: { mean: 0.165, sd: 0.032 }, QRS: { mean: 0.092, sd: 0.014 }, QTc: { mean: 0.425, sd: 0.028 }, QRSaxis: { mean: 45, sd: 35 }, Taxis: { mean: 35, sd: 22 }, Paxis: { mean: 45, sd: 18 } },
   ],
   morphology: {
-    rvDom: [{ age: 0, mean: 1.0, sd: 0.05 }, { age: 0.5, mean: 0.9, sd: 0.08 }, { age: 1, mean: 0.8, sd: 0.1 }, { age: 3, mean: 0.6, sd: 0.12 }, { age: 8, mean: 0.4, sd: 0.12 }, { age: 12, mean: 0.25, sd: 0.1 }, { age: 16, mean: 0.15, sd: 0.08 }],
-    juvenileT: [{ age: 0, mean: 1.0, sd: 0.05 }, { age: 1, mean: 0.9, sd: 0.08 }, { age: 4, mean: 0.75, sd: 0.12 }, { age: 8, mean: 0.5, sd: 0.15 }, { age: 12, mean: 0.25, sd: 0.12 }, { age: 16, mean: 0.1, sd: 0.08 }],
+    rvDom: [{ age: 0, mean: 0.9, sd: 0.08 }, { age: 0.5, mean: 0.75, sd: 0.1 }, { age: 2, mean: 0.5, sd: 0.12 }, { age: 6, mean: 0.2, sd: 0.1 }, { age: 12, mean: 0.05, sd: 0.05 }, { age: 18, mean: 0.0, sd: 0.02 }],
+    juvenileT: [{ age: 0, mean: 0.8, sd: 0.15 }, { age: 3, mean: 0.9, sd: 0.1 }, { age: 8, mean: 0.7, sd: 0.15 }, { age: 14, mean: 0.3, sd: 0.2 }, { age: 18, mean: 0.0, sd: 0.05 }],
     // Rijnbeek 2001 R-wave amplitude targets (mV, median values, averaged M/F)
     // Source: Eur Heart J 2001;22:702-711, Table 5
     rijnbeekTargets: [
@@ -116,7 +116,7 @@ export function getAgeBin(ageY) {
       return bin;
     }
   }
-  // Return last bin (young_adult) for ages >= 16
+  // Return last bin (adult) for ages >= 40
   return PEDIATRIC_PRIORS.age_bins[PEDIATRIC_PRIORS.age_bins.length - 1];
 }
 
@@ -344,13 +344,18 @@ export const DIAGNOSES = [
   "Sinus tachycardia",
 ];
 
-// Age anchors for parameter interpolation
+// Age anchors for parameter interpolation (synced with PEDIATRIC_PRIORS age_bins)
+// Extends to age 100 to support adult ECG synthesis
 const AGE_ANCHORS = [
-  { age: 0.0, HR: 140, PR: 0.1, QRS: 0.065, QTc: 0.41, Paxis: 65, QRSaxis: 125, Taxis: 85, rvDom: 1.0, juvenileT: 1.0, zQ2: 0.75, zT: -0.6 },
-  { age: 1.0, HR: 120, PR: 0.11, QRS: 0.07, QTc: 0.41, Paxis: 60, QRSaxis: 105, Taxis: 70, rvDom: 0.85, juvenileT: 0.9, zQ2: 0.65, zT: -0.55 },
-  { age: 4.0, HR: 100, PR: 0.12, QRS: 0.07, QTc: 0.41, Paxis: 60, QRSaxis: 75, Taxis: 50, rvDom: 0.65, juvenileT: 0.75, zQ2: 0.55, zT: -0.45 },
-  { age: 8.0, HR: 85, PR: 0.14, QRS: 0.08, QTc: 0.41, Paxis: 55, QRSaxis: 60, Taxis: 45, rvDom: 0.45, juvenileT: 0.5, zQ2: 0.45, zT: -0.32 },
-  { age: 16.0, HR: 70, PR: 0.16, QRS: 0.09, QTc: 0.41, Paxis: 55, QRSaxis: 50, Taxis: 40, rvDom: 0.25, juvenileT: 0.2, zQ2: 0.35, zT: -0.18 },
+  { age: 0.0, HR: 145, PR: 0.100, QRS: 0.060, QTc: 0.400, Paxis: 60, QRSaxis: 125, Taxis: 85, rvDom: 0.90, juvenileT: 0.80, zQ2: 0.75, zT: -0.6 },
+  { age: 1.0, HR: 130, PR: 0.115, QRS: 0.068, QTc: 0.410, Paxis: 52, QRSaxis: 75, Taxis: 50, rvDom: 0.75, juvenileT: 0.85, zQ2: 0.65, zT: -0.55 },
+  { age: 4.0, HR: 100, PR: 0.130, QRS: 0.075, QTc: 0.415, Paxis: 48, QRSaxis: 60, Taxis: 40, rvDom: 0.50, juvenileT: 0.90, zQ2: 0.55, zT: -0.45 },
+  { age: 8.0, HR: 85, PR: 0.140, QRS: 0.080, QTc: 0.420, Paxis: 45, QRSaxis: 55, Taxis: 38, rvDom: 0.20, juvenileT: 0.70, zQ2: 0.45, zT: -0.32 },
+  { age: 14.0, HR: 75, PR: 0.150, QRS: 0.085, QTc: 0.420, Paxis: 45, QRSaxis: 55, Taxis: 35, rvDom: 0.05, juvenileT: 0.30, zQ2: 0.38, zT: -0.20 },
+  { age: 18.0, HR: 72, PR: 0.160, QRS: 0.090, QTc: 0.420, Paxis: 45, QRSaxis: 50, Taxis: 35, rvDom: 0.00, juvenileT: 0.00, zQ2: 0.35, zT: -0.18 },
+  { age: 40.0, HR: 70, PR: 0.165, QRS: 0.092, QTc: 0.425, Paxis: 45, QRSaxis: 45, Taxis: 35, rvDom: 0.00, juvenileT: 0.00, zQ2: 0.30, zT: -0.15 },
+  { age: 70.0, HR: 68, PR: 0.175, QRS: 0.095, QTc: 0.430, Paxis: 45, QRSaxis: 40, Taxis: 35, rvDom: 0.00, juvenileT: 0.00, zQ2: 0.28, zT: -0.12 },
+  { age: 100.0, HR: 68, PR: 0.180, QRS: 0.098, QTc: 0.435, Paxis: 45, QRSaxis: 35, Taxis: 35, rvDom: 0.00, juvenileT: 0.00, zQ2: 0.25, zT: -0.10 },
 ];
 
 function interpAnchors(age, anchors, key) {
@@ -367,7 +372,7 @@ function interpAnchors(age, anchors, key) {
 }
 
 export function ageDefaults(ageY, sex = null) {
-  ageY = clamp(ageY, 0, 25);
+  ageY = clamp(ageY, 0, 100);
 
   let QTc = interpAnchors(ageY, AGE_ANCHORS, "QTc");
   let QRS = interpAnchors(ageY, AGE_ANCHORS, "QRS");
