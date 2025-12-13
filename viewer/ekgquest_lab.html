@@ -2340,6 +2340,8 @@ function extractWaveformFromImage(img, calibration) {
 
     // Convert pixel positions to voltage
     const centerY = (region.y1 + region.y2) / 2;
+    console.log(`[DEBUG] Region ${region.label}: centerY=${centerY.toFixed(0)}, pxPerMm=${pxPerMm.toFixed(2)}, gain=${gain}`);
+
     const voltages = trace.map(t => {
       if (t.y === null) return 0;
       // y increases downward, voltage increases upward
@@ -2347,6 +2349,10 @@ function extractWaveformFromImage(img, calibration) {
       const mV = mm_from_center / gain;
       return Math.round(mV * 1000); // Convert to µV
     });
+
+    const minV = Math.min(...voltages);
+    const maxV = Math.max(...voltages);
+    console.log(`[DEBUG] Voltage range: ${minV} to ${maxV} µV (${maxV - minV} µV range)`);
 
     // Resample to target sample rate
     const duration_s = (trace.length / pxPerMm) / paperSpeed;
@@ -2754,132 +2760,94 @@ function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceCol
   traceColor = traceColor || { type: 'black' };
   watermarkMask = watermarkMask || null;
 
+  console.log(`[DEBUG] Extracting trace: y1=${y1}, y2=${y2}, grid=${gridColor}, trace=${traceColor.type}`);
+
   const trace = [];
   const regionHeight = y2 - y1;
 
+  // SIMPLIFIED APPROACH: Find darkest non-grid pixel in each column
+  // This preserves QRS morphology better than weighted centroid
   for (let x = 0; x < width; x++) {
-    // Use weighted centroid of trace pixels instead of just darkest
-    let sumY = 0;
-    let sumWeight = 0;
-    let darkestY = null;
-    let darkestBrightness = 255;
+    let bestY = null;
+    let bestScore = -Infinity;
 
     for (let y = y1; y < y2; y++) {
       const pixelIdx = y * width + x;
       const i = pixelIdx * 4;
       const r = data[i], g = data[i+1], b = data[i+2];
+      const brightness = (r + g + b) / 3;
 
       // Skip watermark pixels
-      if (watermarkMask && watermarkMask[pixelIdx]) {
-        continue;
-      }
+      if (watermarkMask && watermarkMask[pixelIdx]) continue;
 
-      if (isTracePixel(r, g, b, gridColor, traceColor)) {
-        const brightness = (r + g + b) / 3;
-        const weight = (100 - brightness) / 100; // Darker = higher weight
+      // Skip grid pixels (red, pink, orange grid lines)
+      if (gridColor === 'red' && r > 150 && r > g * 1.2 && r > b * 1.2) continue;
+      if (gridColor === 'orange' && r > 150 && g > 100 && b < 100) continue;
+      if (gridColor === 'green' && g > 150 && g > r * 1.2) continue;
+      if (gridColor === 'blue' && b > 150 && b > r * 1.2) continue;
 
-        sumY += y * weight;
-        sumWeight += weight;
+      // Skip light background pixels
+      if (brightness > 200) continue;
 
-        if (brightness < darkestBrightness) {
-          darkestBrightness = brightness;
-          darkestY = y;
-        }
+      // Score: prefer darker pixels (lower brightness = higher score)
+      const score = 255 - brightness;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestY = y;
       }
     }
 
-    // Use weighted centroid if we have enough trace pixels, otherwise darkest
-    let finalY = null;
-    if (sumWeight > 0.5) {
-      finalY = sumY / sumWeight;
-    } else if (darkestY !== null) {
-      finalY = darkestY;
-    }
-
-    trace.push({ x, y: finalY, weight: sumWeight });
+    trace.push({ x, y: bestY });
   }
 
-  // Step 1: Outlier detection using local statistics
-  // Calculate running median and MAD (median absolute deviation)
-  const localWindow = 20;
-  for (let i = 0; i < trace.length; i++) {
-    if (trace[i].y === null) continue;
-
-    const neighbors = [];
-    for (let j = -localWindow; j <= localWindow; j++) {
-      const idx = i + j;
-      if (idx >= 0 && idx < trace.length && trace[idx].y !== null) {
-        neighbors.push(trace[idx].y);
-      }
-    }
-
-    if (neighbors.length >= 5) {
-      neighbors.sort((a, b) => a - b);
-      const localMedian = neighbors[Math.floor(neighbors.length / 2)];
-      const deviations = neighbors.map(v => Math.abs(v - localMedian));
-      deviations.sort((a, b) => a - b);
-      const mad = deviations[Math.floor(deviations.length / 2)] || 1;
-
-      // If this point is more than 3 MAD from local median, it's an outlier
-      const deviation = Math.abs(trace[i].y - localMedian);
-      if (deviation > mad * 3) {
-        trace[i].y = null; // Mark as outlier
-      }
-    }
+  // Debug: show trace stats before any filtering
+  const validPoints = trace.filter(t => t.y !== null);
+  if (validPoints.length > 0) {
+    const yVals = validPoints.map(t => t.y);
+    const minY = Math.min(...yVals);
+    const maxY = Math.max(...yVals);
+    console.log(`[DEBUG] Raw trace: ${validPoints.length}/${trace.length} valid, Y range: ${minY.toFixed(0)}-${maxY.toFixed(0)} (${maxY-minY}px)`);
+  } else {
+    console.log(`[DEBUG] WARNING: No valid trace points found!`);
   }
 
-  // Step 2: Median filter to smooth remaining noise
-  const medianFiltered = [];
-  const medianWindow = 3;
+  // MINIMAL FILTERING: Only fill gaps, no smoothing that could remove QRS
+  // Fill gaps using linear interpolation
+  const result = [];
   for (let i = 0; i < trace.length; i++) {
-    const window = [];
-    for (let j = -medianWindow; j <= medianWindow; j++) {
-      const idx = i + j;
-      if (idx >= 0 && idx < trace.length && trace[idx].y !== null) {
-        window.push(trace[idx].y);
-      }
-    }
-    if (window.length > 0) {
-      window.sort((a, b) => a - b);
-      medianFiltered.push({ x: trace[i].x, y: window[Math.floor(window.length / 2)] });
+    if (trace[i].y !== null) {
+      result.push({ x: trace[i].x, y: trace[i].y });
     } else {
-      medianFiltered.push({ x: trace[i].x, y: null });
-    }
-  }
-
-  // Step 3: Fill gaps using linear interpolation
-  for (let i = 0; i < medianFiltered.length; i++) {
-    if (medianFiltered[i].y === null) {
+      // Find nearest valid points on left and right
       let left = i - 1;
-      while (left >= 0 && medianFiltered[left].y === null) left--;
+      while (left >= 0 && trace[left].y === null) left--;
 
       let right = i + 1;
-      while (right < medianFiltered.length && medianFiltered[right].y === null) right++;
+      while (right < trace.length && trace[right].y === null) right++;
 
-      if (left >= 0 && right < medianFiltered.length) {
+      if (left >= 0 && right < trace.length) {
+        // Interpolate
         const t = (i - left) / (right - left);
-        medianFiltered[i].y = medianFiltered[left].y + t * (medianFiltered[right].y - medianFiltered[left].y);
+        const interpY = trace[left].y + t * (trace[right].y - trace[left].y);
+        result.push({ x: trace[i].x, y: interpY });
+      } else if (left >= 0) {
+        result.push({ x: trace[i].x, y: trace[left].y });
+      } else if (right < trace.length) {
+        result.push({ x: trace[i].x, y: trace[right].y });
+      } else {
+        result.push({ x: trace[i].x, y: (y1 + y2) / 2 }); // Default to center
       }
     }
   }
 
-  // Step 4: Light Gaussian smoothing for final cleanup
-  const smoothed = [];
-  const gaussWindow = 2;
-  for (let i = 0; i < medianFiltered.length; i++) {
-    let sum = 0, weightSum = 0;
-    for (let j = -gaussWindow; j <= gaussWindow; j++) {
-      const idx = i + j;
-      if (idx >= 0 && idx < medianFiltered.length && medianFiltered[idx].y !== null) {
-        const weight = Math.exp(-j * j / 2); // Gaussian weight
-        sum += medianFiltered[idx].y * weight;
-        weightSum += weight;
-      }
-    }
-    smoothed.push({ x: medianFiltered[i].x, y: weightSum > 0 ? sum / weightSum : medianFiltered[i].y });
-  }
+  // Debug: show final trace stats
+  const finalYVals = result.map(t => t.y);
+  const finalMinY = Math.min(...finalYVals);
+  const finalMaxY = Math.max(...finalYVals);
+  console.log(`[DEBUG] Final trace: Y range ${finalMinY.toFixed(0)}-${finalMaxY.toFixed(0)} (${(finalMaxY-finalMinY).toFixed(0)}px)`);
 
-  return smoothed;
+  return result;
 }
 
 function resampleSignal(signal, targetLength) {
