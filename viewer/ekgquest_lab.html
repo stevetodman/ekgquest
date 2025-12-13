@@ -287,6 +287,90 @@
     font-size: 11px;
   }
 
+  /* Caliper Measurement List */
+  .caliper-list {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-top: 12px;
+  }
+  .caliper-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .caliper-list-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .caliper-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .caliper-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .caliper-item.active {
+    border-color: var(--accent);
+    background: #f0f7ff;
+  }
+  .caliper-item-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .caliper-item-values {
+    flex: 1;
+    display: flex;
+    gap: 16px;
+  }
+  .caliper-item-value {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-weight: 600;
+  }
+  .caliper-item-label {
+    color: var(--muted);
+    font-size: 11px;
+    margin-left: 2px;
+  }
+  .caliper-item-delete {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .caliper-item-delete:hover {
+    background: #fee;
+    color: var(--warn);
+  }
+  .caliper-empty {
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    padding: 12px;
+  }
+  .caliper-handle {
+    cursor: grab;
+  }
+  .caliper-handle:active {
+    cursor: grabbing;
+  }
+
   /* Advanced Section */
   .advanced-toggle {
     display: flex;
@@ -453,13 +537,16 @@
 
   <!-- Tools Panel -->
   <div class="tab-panel" id="panel-tools">
-    <button id="calBtn" onclick="toggleCalipers()">Calipers: OFF</button>
-    <button onclick="clearCalipers()">Clear Calipers</button>
+    <button id="calBtn" class="primary" onclick="toggleCalipers()">Calipers: OFF</button>
+    <label><input id="snapPeaks" type="checkbox" checked> Snap to R-peaks</label>
+    <label><input id="snapGrid" type="checkbox"> Snap to grid</label>
+    <button onclick="clearAllCalipers()">Clear All</button>
     <div class="divider"></div>
     <span class="hint">
-      <span class="kbd">C</span> Toggle calipers &nbsp;
-      <span class="kbd">Drag</span> Pan &nbsp;
-      <span class="kbd">Wheel</span> Zoom
+      <span class="kbd">C</span> Toggle &nbsp;
+      <span class="kbd">Shift</span> Constrain H/V &nbsp;
+      <span class="kbd">Del</span> Remove selected &nbsp;
+      <span class="kbd">Esc</span> Cancel
     </span>
   </div>
 
@@ -493,6 +580,17 @@
   <canvas id="c"></canvas>
 </div>
 
+<!-- Caliper Measurements List -->
+<div class="caliper-list" id="caliperList" style="display:none">
+  <div class="caliper-list-header">
+    <span class="caliper-list-title">Caliper Measurements</span>
+    <button onclick="clearAllCalipers()" style="font-size:12px;padding:4px 10px">Clear All</button>
+  </div>
+  <div class="caliper-items" id="caliperItems">
+    <div class="caliper-empty">Click two points on the ECG to measure intervals</div>
+  </div>
+</div>
+
 <!-- Footer -->
 <div class="footer">
   EKGQuest Lab — Educational ECG synthesis and teaching tool.
@@ -519,10 +617,20 @@ let synthModule = null;
 let currentMode = 'quiz';  // 'quiz' or 'teach'
 let ecgData = null;
 let measurements = null;
-let calipersActive = false;
-let caliperPoints = [];
 let panOffset = 0;
 let zoomLevel = 1;
+
+// Advanced Caliper State
+let calipersActive = false;
+let caliperMeasurements = [];  // Array of completed measurements
+let activeCaliperPoint = null; // First point of in-progress measurement
+let selectedCaliperId = null;  // Currently selected measurement for editing
+let draggingHandle = null;     // { measurementId, handle: 'p1' | 'p2' }
+let shiftHeld = false;
+let lastMousePos = null;
+
+const CALIPER_COLORS = ['#1b6dff', '#e91e63', '#4caf50', '#ff9800', '#9c27b0', '#00bcd4'];
+let nextCaliperColor = 0;
 
 // ============================================================================
 // MODE MANAGEMENT
@@ -843,10 +951,8 @@ function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, sho
     drawFiducials(ctx, leads.II || leads['II'], fs, measurements, h / 2, pxPerMm * mmPerSec / fs);
   }
 
-  // Draw calipers
-  if (caliperPoints.length >= 2) {
-    drawCalipers(ctx, fs, pxPerMm * mmPerSec / fs);
-  }
+  // Draw calipers (advanced system)
+  drawAllCalipers(ctx, w, h);
 }
 
 function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, showFid) {
@@ -920,6 +1026,9 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
     }
     ctx.stroke();
   }
+
+  // Draw calipers (advanced system)
+  drawAllCalipers(ctx, w, h);
 }
 
 function drawGrid(ctx, w, h, pxPerMm) {
@@ -974,73 +1083,473 @@ function drawFiducials(ctx, signal, fs, meas, y0, pxPerSample) {
   });
 }
 
-function drawCalipers(ctx, fs, pxPerSample) {
-  if (caliperPoints.length < 2) return;
+// ============================================================================
+// ADVANCED CALIPER SYSTEM
+// ============================================================================
 
-  const p1 = caliperPoints[0];
-  const p2 = caliperPoints[1];
+function getCaliperScaling() {
+  const speed = parseInt(document.getElementById('speed').value);
+  const gain = parseInt(document.getElementById('gain').value);
+  const pxmm = parseInt(document.getElementById('pxmm').value);
+  const fs = ecgData?.fs || 1000;
 
-  // Draw lines
-  ctx.strokeStyle = '#1b6dff';
-  ctx.lineWidth = 2;
+  const pxPerSample = (pxmm * speed) / fs;
+  const uvPerPx = 1000 / (pxmm * gain);
 
-  ctx.beginPath();
-  ctx.moveTo(p1.x, p1.y - 30);
-  ctx.lineTo(p1.x, p1.y + 30);
-  ctx.moveTo(p2.x, p2.y - 30);
-  ctx.lineTo(p2.x, p2.y + 30);
-  ctx.moveTo(p1.x, (p1.y + p2.y) / 2);
-  ctx.lineTo(p2.x, (p1.y + p2.y) / 2);
-  ctx.stroke();
-
-  // Measurement label
-  const dx = Math.abs(p2.x - p1.x);
-  const dt = dx / pxPerSample / fs * 1000;
-  const midX = (p1.x + p2.x) / 2;
-  const midY = Math.min(p1.y, p2.y) - 40;
-
-  ctx.fillStyle = '#1b6dff';
-  ctx.font = 'bold 14px system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText(`${Math.round(dt)} ms`, midX, midY);
+  return { pxPerSample, uvPerPx, fs, pxmm };
 }
 
-// ============================================================================
-// CALIPERS
-// ============================================================================
+function snapToRPeak(x, tolerance = 15) {
+  if (!document.getElementById('snapPeaks').checked) return x;
+  if (!measurements?.rPeaks || !ecgData) return x;
+
+  const { pxPerSample } = getCaliperScaling();
+  const baseX = 40 + panOffset;
+
+  for (const rIdx of measurements.rPeaks) {
+    const peakX = baseX + rIdx * pxPerSample;
+    if (Math.abs(peakX - x) < tolerance) {
+      return peakX;
+    }
+  }
+  return x;
+}
+
+function snapToGrid(x, y) {
+  if (!document.getElementById('snapGrid').checked) return { x, y };
+  const { pxmm } = getCaliperScaling();
+  const gridSize = pxmm * 5; // 5mm grid
+  return {
+    x: Math.round(x / gridSize) * gridSize,
+    y: Math.round(y / gridSize) * gridSize
+  };
+}
+
+function constrainPoint(x, y, refX, refY, shiftHeld) {
+  if (!shiftHeld) return { x, y };
+
+  const dx = Math.abs(x - refX);
+  const dy = Math.abs(y - refY);
+
+  // Constrain to horizontal or vertical based on dominant direction
+  if (dx > dy) {
+    return { x, y: refY }; // Horizontal constraint
+  } else {
+    return { x: refX, y }; // Vertical constraint
+  }
+}
+
+function calculateMeasurement(p1, p2) {
+  const { pxPerSample, uvPerPx, fs } = getCaliperScaling();
+
+  const dx = Math.abs(p2.x - p1.x);
+  const dy = p1.y - p2.y; // Inverted because canvas Y is down
+
+  const dt_ms = dx / pxPerSample / fs * 1000;
+  const dv_uv = dy * uvPerPx;
+  const rate_bpm = dt_ms > 0 ? 60000 / dt_ms : 0;
+
+  return { dt_ms, dv_uv, rate_bpm };
+}
+
+function drawAllCalipers(ctx, w, h) {
+  const { pxPerSample, uvPerPx, fs } = getCaliperScaling();
+
+  // Draw completed measurements
+  caliperMeasurements.forEach((m, idx) => {
+    const isSelected = m.id === selectedCaliperId;
+    drawSingleCaliper(ctx, m.p1, m.p2, m.color, isSelected, m.id);
+  });
+
+  // Draw in-progress measurement
+  if (activeCaliperPoint && lastMousePos) {
+    let endPoint = { ...lastMousePos };
+
+    // Apply constraints
+    if (shiftHeld) {
+      endPoint = constrainPoint(endPoint.x, endPoint.y, activeCaliperPoint.x, activeCaliperPoint.y, true);
+    }
+
+    // Apply snapping
+    endPoint.x = snapToRPeak(endPoint.x);
+    if (document.getElementById('snapGrid').checked) {
+      const snapped = snapToGrid(endPoint.x, endPoint.y);
+      endPoint = snapped;
+    }
+
+    const color = CALIPER_COLORS[nextCaliperColor % CALIPER_COLORS.length];
+    drawSingleCaliper(ctx, activeCaliperPoint, endPoint, color, true, null, true);
+  }
+}
+
+function drawSingleCaliper(ctx, p1, p2, color, isSelected, id, isPreview = false) {
+  const { dt_ms, dv_uv, rate_bpm } = calculateMeasurement(p1, p2);
+
+  const lineWidth = isSelected ? 2.5 : 1.5;
+  const handleSize = isSelected ? 7 : 5;
+  const alpha = isPreview ? 0.7 : 1;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // Vertical lines at endpoints
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.setLineDash(isPreview ? [4, 4] : []);
+
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y - 35);
+  ctx.lineTo(p1.x, p1.y + 35);
+  ctx.moveTo(p2.x, p2.y - 35);
+  ctx.lineTo(p2.x, p2.y + 35);
+  ctx.stroke();
+
+  // Horizontal connecting line
+  const midY = (p1.y + p2.y) / 2;
+  ctx.beginPath();
+  ctx.moveTo(p1.x, midY);
+  ctx.lineTo(p2.x, midY);
+  ctx.stroke();
+
+  // Arrow heads
+  const arrowSize = 6;
+  const leftX = Math.min(p1.x, p2.x);
+  const rightX = Math.max(p1.x, p2.x);
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(leftX, midY);
+  ctx.lineTo(leftX + arrowSize, midY - arrowSize/2);
+  ctx.lineTo(leftX + arrowSize, midY + arrowSize/2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(rightX, midY);
+  ctx.lineTo(rightX - arrowSize, midY - arrowSize/2);
+  ctx.lineTo(rightX - arrowSize, midY + arrowSize/2);
+  ctx.fill();
+
+  // Draggable handles (squares at endpoints)
+  if (isSelected && !isPreview) {
+    ctx.fillStyle = color;
+    ctx.fillRect(p1.x - handleSize, p1.y - handleSize, handleSize * 2, handleSize * 2);
+    ctx.fillRect(p2.x - handleSize, p2.y - handleSize, handleSize * 2, handleSize * 2);
+
+    // White centers
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(p1.x - handleSize + 2, p1.y - handleSize + 2, handleSize * 2 - 4, handleSize * 2 - 4);
+    ctx.fillRect(p2.x - handleSize + 2, p2.y - handleSize + 2, handleSize * 2 - 4, handleSize * 2 - 4);
+  }
+
+  // Measurement label background
+  const midX = (p1.x + p2.x) / 2;
+  const labelY = Math.min(p1.y, p2.y) - 45;
+
+  const mainLabel = `${Math.round(dt_ms)} ms`;
+  const rateLabel = dt_ms > 100 ? ` (${Math.round(rate_bpm)} bpm)` : '';
+  const ampLabel = Math.abs(dv_uv) > 50 ? `  ΔV: ${Math.round(dv_uv)} µV` : '';
+  const fullLabel = mainLabel + rateLabel + ampLabel;
+
+  ctx.font = 'bold 13px system-ui';
+  const textWidth = ctx.measureText(fullLabel).width;
+
+  // Background pill
+  ctx.fillStyle = isSelected ? color : 'rgba(255,255,255,0.95)';
+  ctx.beginPath();
+  ctx.roundRect(midX - textWidth/2 - 8, labelY - 10, textWidth + 16, 22, 6);
+  ctx.fill();
+
+  if (!isSelected) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Label text
+  ctx.fillStyle = isSelected ? '#fff' : color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(fullLabel, midX, labelY);
+
+  ctx.restore();
+  ctx.setLineDash([]);
+}
+
+function hitTestCaliperHandle(x, y) {
+  const handleSize = 10;
+
+  for (const m of caliperMeasurements) {
+    if (Math.abs(x - m.p1.x) < handleSize && Math.abs(y - m.p1.y) < handleSize) {
+      return { measurementId: m.id, handle: 'p1' };
+    }
+    if (Math.abs(x - m.p2.x) < handleSize && Math.abs(y - m.p2.y) < handleSize) {
+      return { measurementId: m.id, handle: 'p2' };
+    }
+  }
+  return null;
+}
+
+function hitTestCaliper(x, y) {
+  for (const m of caliperMeasurements) {
+    const minX = Math.min(m.p1.x, m.p2.x) - 5;
+    const maxX = Math.max(m.p1.x, m.p2.x) + 5;
+    const minY = Math.min(m.p1.y, m.p2.y) - 40;
+    const maxY = Math.max(m.p1.y, m.p2.y) + 40;
+
+    if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+      return m.id;
+    }
+  }
+  return null;
+}
+
+function updateCaliperList() {
+  const container = document.getElementById('caliperItems');
+  const listPanel = document.getElementById('caliperList');
+
+  if (caliperMeasurements.length === 0) {
+    listPanel.style.display = 'none';
+    return;
+  }
+
+  listPanel.style.display = 'block';
+
+  container.innerHTML = caliperMeasurements.map((m, idx) => {
+    const { dt_ms, dv_uv, rate_bpm } = calculateMeasurement(m.p1, m.p2);
+    const isSelected = m.id === selectedCaliperId;
+
+    return `
+      <div class="caliper-item ${isSelected ? 'active' : ''}" onclick="selectCaliper('${m.id}')" data-id="${m.id}">
+        <div class="caliper-item-color" style="background:${m.color}"></div>
+        <div class="caliper-item-values">
+          <span>
+            <span class="caliper-item-value">${Math.round(dt_ms)}</span>
+            <span class="caliper-item-label">ms</span>
+          </span>
+          ${dt_ms > 100 ? `<span>
+            <span class="caliper-item-value">${Math.round(rate_bpm)}</span>
+            <span class="caliper-item-label">bpm</span>
+          </span>` : ''}
+          ${Math.abs(dv_uv) > 50 ? `<span>
+            <span class="caliper-item-value">${Math.round(dv_uv)}</span>
+            <span class="caliper-item-label">µV</span>
+          </span>` : ''}
+        </div>
+        <button class="caliper-item-delete" onclick="event.stopPropagation(); deleteCaliper('${m.id}')" title="Delete">×</button>
+      </div>
+    `;
+  }).join('');
+}
+
+window.selectCaliper = function(id) {
+  selectedCaliperId = id === selectedCaliperId ? null : id;
+  updateCaliperList();
+  redraw();
+};
+
+window.deleteCaliper = function(id) {
+  caliperMeasurements = caliperMeasurements.filter(m => m.id !== id);
+  if (selectedCaliperId === id) selectedCaliperId = null;
+  updateCaliperList();
+  redraw();
+};
 
 window.toggleCalipers = function() {
   calipersActive = !calipersActive;
-  document.getElementById('calBtn').textContent = calipersActive ? 'Calipers: ON' : 'Calipers: OFF';
+  const btn = document.getElementById('calBtn');
+  btn.textContent = calipersActive ? 'Calipers: ON' : 'Calipers: OFF';
+  btn.classList.toggle('primary', !calipersActive);
   document.getElementById('c').style.cursor = calipersActive ? 'crosshair' : 'default';
+
+  if (calipersActive) {
+    document.getElementById('caliperList').style.display = 'block';
+  }
 };
 
-window.clearCalipers = function() {
-  caliperPoints = [];
+window.clearAllCalipers = function() {
+  caliperMeasurements = [];
+  activeCaliperPoint = null;
+  selectedCaliperId = null;
+  draggingHandle = null;
+  updateCaliperList();
   redraw();
 };
 
-document.getElementById('c').addEventListener('click', (e) => {
+// Canvas mouse events
+const canvas = document.getElementById('c');
+
+canvas.addEventListener('mousedown', (e) => {
   if (!calipersActive) return;
 
-  const rect = e.target.getBoundingClientRect();
+  const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
 
-  if (caliperPoints.length >= 2) {
-    caliperPoints = [];
+  // Check for handle drag
+  const handle = hitTestCaliperHandle(x, y);
+  if (handle && handle.measurementId === selectedCaliperId) {
+    draggingHandle = handle;
+    canvas.style.cursor = 'grabbing';
+    return;
   }
-  caliperPoints.push({ x, y });
 
+  // Check for caliper selection
+  const hitId = hitTestCaliper(x, y);
+  if (hitId) {
+    selectedCaliperId = hitId;
+    updateCaliperList();
+    redraw();
+    return;
+  }
+
+  // Start new measurement
+  let snappedX = snapToRPeak(x);
+  if (document.getElementById('snapGrid').checked) {
+    const snapped = snapToGrid(snappedX, y);
+    snappedX = snapped.x;
+  }
+
+  if (!activeCaliperPoint) {
+    activeCaliperPoint = { x: snappedX, y };
+    selectedCaliperId = null;
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  lastMousePos = { x, y };
+
+  if (draggingHandle) {
+    const m = caliperMeasurements.find(m => m.id === draggingHandle.measurementId);
+    if (m) {
+      let newX = snapToRPeak(x);
+      let newY = y;
+
+      // Apply shift constraint relative to the OTHER point
+      const otherPoint = draggingHandle.handle === 'p1' ? m.p2 : m.p1;
+      if (shiftHeld) {
+        const constrained = constrainPoint(newX, newY, otherPoint.x, otherPoint.y, true);
+        newX = constrained.x;
+        newY = constrained.y;
+      }
+
+      if (draggingHandle.handle === 'p1') {
+        m.p1 = { x: newX, y: newY };
+      } else {
+        m.p2 = { x: newX, y: newY };
+      }
+      updateCaliperList();
+      redraw();
+    }
+    return;
+  }
+
+  if (activeCaliperPoint) {
+    redraw();
+  }
+
+  // Update cursor based on hover
+  if (calipersActive && !activeCaliperPoint) {
+    const handle = hitTestCaliperHandle(x, y);
+    if (handle && handle.measurementId === selectedCaliperId) {
+      canvas.style.cursor = 'grab';
+    } else {
+      canvas.style.cursor = 'crosshair';
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (draggingHandle) {
+    draggingHandle = null;
+    canvas.style.cursor = calipersActive ? 'crosshair' : 'default';
+    return;
+  }
+
+  if (!calipersActive || !activeCaliperPoint) return;
+
+  const rect = canvas.getBoundingClientRect();
+  let x = e.clientX - rect.left;
+  let y = e.clientY - rect.top;
+
+  // Apply constraints and snapping
+  if (shiftHeld) {
+    const constrained = constrainPoint(x, y, activeCaliperPoint.x, activeCaliperPoint.y, true);
+    x = constrained.x;
+    y = constrained.y;
+  }
+
+  x = snapToRPeak(x);
+  if (document.getElementById('snapGrid').checked) {
+    const snapped = snapToGrid(x, y);
+    x = snapped.x;
+    y = snapped.y;
+  }
+
+  // Only create measurement if there's meaningful distance
+  const dist = Math.hypot(x - activeCaliperPoint.x, y - activeCaliperPoint.y);
+  if (dist > 5) {
+    const color = CALIPER_COLORS[nextCaliperColor % CALIPER_COLORS.length];
+    nextCaliperColor++;
+
+    const measurement = {
+      id: 'cal_' + Date.now(),
+      p1: activeCaliperPoint,
+      p2: { x, y },
+      color
+    };
+
+    caliperMeasurements.push(measurement);
+    selectedCaliperId = measurement.id;
+    updateCaliperList();
+  }
+
+  activeCaliperPoint = null;
   redraw();
 });
 
-// Keyboard shortcut for calipers
+canvas.addEventListener('mouseleave', () => {
+  if (draggingHandle) {
+    draggingHandle = null;
+  }
+  lastMousePos = null;
+  if (activeCaliperPoint) {
+    redraw();
+  }
+});
+
+// Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Shift') {
+    shiftHeld = true;
+  }
+
+  if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT') {
+    return;
+  }
+
   if (e.key === 'c' || e.key === 'C') {
-    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
-      toggleCalipers();
-    }
+    toggleCalipers();
+  }
+
+  if (e.key === 'Escape') {
+    activeCaliperPoint = null;
+    selectedCaliperId = null;
+    updateCaliperList();
+    redraw();
+  }
+
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCaliperId) {
+    deleteCaliper(selectedCaliperId);
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Shift') {
+    shiftHeld = false;
   }
 });
 
