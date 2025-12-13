@@ -1287,26 +1287,7 @@ window.loadFromClipboard = async function() {
           const blob = await item.getType(imageTypes[0]);
           const img = new Image();
           img.onload = function() {
-            uploadedImage = img;
-            uploadedImageName = 'clipboard-paste.png';
-            imageMode = true;
-            imageCalibration = null;
-
-            // Try auto-calibration
-            const detected = detectGridSpacing(img);
-            if (detected && detected.confidence > 0.6) {
-              imageCalibration = {
-                pxPerMm: detected.pxPerMm / (img.width / uploadedImage.width),
-                method: 'auto-clipboard'
-              };
-              showStatus('Pasted from clipboard with auto-calibration', 'success');
-            } else {
-              showStatus('Pasted from clipboard - click Calibrate for accurate measurements', 'info');
-            }
-
-            document.getElementById('calibrationControls').style.display = 'block';
-            document.getElementById('caseInfo').textContent = 'Clipboard paste';
-            redraw();
+            processImportedImage(img, 'clipboard-paste.png');
           };
           img.src = URL.createObjectURL(blob);
           return;
@@ -1353,25 +1334,7 @@ document.addEventListener('paste', async (e) => {
       const blob = item.getAsFile();
       const img = new Image();
       img.onload = function() {
-        uploadedImage = img;
-        uploadedImageName = 'pasted-image.png';
-        imageMode = true;
-        imageCalibration = null;
-
-        const detected = detectGridSpacing(img);
-        if (detected && detected.confidence > 0.6) {
-          imageCalibration = {
-            pxPerMm: detected.pxPerMm,
-            method: 'auto-paste'
-          };
-          showStatus('ECG pasted with auto-calibration!', 'success');
-        } else {
-          showStatus('ECG pasted - click Calibrate for measurements', 'info');
-        }
-
-        document.getElementById('calibrationControls').style.display = 'block';
-        document.getElementById('caseInfo').textContent = 'Pasted image';
-        redraw();
+        processImportedImage(img, 'pasted-image.png');
       };
       img.src = URL.createObjectURL(blob);
       return;
@@ -1441,82 +1404,171 @@ dropZone.addEventListener('drop', async (e) => {
 function loadDroppedImage(file) {
   const img = new Image();
   img.onload = function() {
-    uploadedImage = img;
-    uploadedImageName = file.name;
-    imageMode = true;
-    imageCalibration = null;
-
-    const detected = detectGridSpacing(img);
-    if (detected && detected.confidence > 0.6) {
-      imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-drop' };
-      showStatus('ECG dropped with auto-calibration!', 'success');
-    } else {
-      showStatus('ECG dropped - click Calibrate for measurements', 'info');
-    }
-
-    document.getElementById('calibrationControls').style.display = 'block';
-    document.getElementById('caseInfo').textContent = file.name;
-    redraw();
+    processImportedImage(img, file.name);
   };
   img.src = URL.createObjectURL(file);
+}
+
+// Central function to process any imported image
+function processImportedImage(img, name) {
+  uploadedImage = img;
+  uploadedImageName = name || 'imported.png';
+
+  // Try auto-calibration
+  const detected = detectGridSpacing(img);
+  if (detected && detected.confidence > 0.6) {
+    imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto' };
+
+    // Auto-digitize if calibration succeeded
+    showStatus('Digitizing ECG...', 'info', 0);
+    setTimeout(() => {
+      autoDigitizeImage(img, imageCalibration);
+    }, 50);
+  } else {
+    // Fall back to image mode without digitization
+    imageMode = true;
+    imageCalibration = null;
+    document.getElementById('calibrationControls').style.display = 'block';
+    document.getElementById('caseInfo').textContent = uploadedImageName;
+    showStatus('ECG loaded - click "Digitize" after calibrating for full features', 'info');
+    redraw();
+  }
+}
+
+// Auto-digitize image to waveform data
+function autoDigitizeImage(img, calibration) {
+  try {
+    const extracted = extractWaveformFromImage(img, calibration);
+
+    if (!extracted || Object.keys(extracted.leads_uV).length === 0) {
+      // Fall back to image mode
+      imageMode = true;
+      document.getElementById('calibrationControls').style.display = 'block';
+      showStatus('Could not extract trace - showing as image', 'warning');
+      redraw();
+      return;
+    }
+
+    // Fill in missing leads
+    const leads = fillMissingLeads(extracted.leads_uV);
+
+    // Create full ECG data structure
+    ecgData = {
+      schema_version: '1.0',
+      fs: extracted.fs,
+      duration_s: extracted.duration_s,
+      leads_uV: leads,
+      targets: {
+        synthetic: false,
+        imported: true,
+        source: 'image',
+        filename: uploadedImageName,
+        dx: 'Imported ECG',
+        import_time: new Date().toISOString()
+      },
+      integrity: {
+        format: 'auto_digitized',
+        method: calibration.method
+      }
+    };
+
+    // Switch to waveform mode (not image mode)
+    imageMode = false;
+    uploadedImage = null;
+    document.getElementById('calibrationControls').style.display = 'none';
+
+    // Update UI
+    updateAfterLoad();
+    showStatus('ECG digitized! Now works like a generated ECG.', 'success');
+
+  } catch (err) {
+    console.error('Digitization error:', err);
+    imageMode = true;
+    document.getElementById('calibrationControls').style.display = 'block';
+    showStatus('Digitization failed - showing as image', 'warning');
+    redraw();
+  }
+}
+
+// Fill in missing leads from available leads
+function fillMissingLeads(leads_uV) {
+  const LEAD_NAMES = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+  const filled = { ...leads_uV };
+  const sampleCount = Object.values(leads_uV)[0]?.length || 5000;
+
+  // If we have Lead II, use it as the basis
+  const baseLead = filled['II'] || filled['I'] || Object.values(filled)[0];
+
+  if (!baseLead) {
+    // No leads at all, create zeros
+    for (const lead of LEAD_NAMES) {
+      filled[lead] = new Array(sampleCount).fill(0);
+    }
+    return filled;
+  }
+
+  // Fill limb leads using Einthoven relationships if possible
+  const hasI = 'I' in filled;
+  const hasII = 'II' in filled;
+  const hasIII = 'III' in filled;
+
+  if (!hasI && hasII) {
+    // Estimate Lead I from Lead II (assume III ~ 0.4 * II)
+    filled['I'] = baseLead.map(v => v * 0.6);
+  }
+  if (!hasII && hasI) {
+    filled['II'] = filled['I'].map(v => v * 1.2);
+  }
+  if (!hasIII && hasI && hasII) {
+    filled['III'] = filled['I'].map((v, i) => filled['II'][i] - v);
+  }
+
+  // Fill augmented leads
+  if (!('aVR' in filled) && filled['I'] && filled['II']) {
+    filled['aVR'] = filled['I'].map((v, i) => -(v + filled['II'][i]) / 2);
+  }
+  if (!('aVL' in filled) && filled['I'] && filled['II']) {
+    filled['aVL'] = filled['I'].map((v, i) => v - filled['II'][i] / 2);
+  }
+  if (!('aVF' in filled) && filled['I'] && filled['II']) {
+    filled['aVF'] = filled['II'].map((v, i) => v - filled['I'][i] / 2);
+  }
+
+  // Fill precordial leads with approximations if missing
+  const precordialBase = filled['II'] || filled['I'] || baseLead;
+  const precordialScales = { 'V1': -0.3, 'V2': -0.1, 'V3': 0.2, 'V4': 0.5, 'V5': 0.7, 'V6': 0.8 };
+
+  for (const [lead, scale] of Object.entries(precordialScales)) {
+    if (!(lead in filled)) {
+      filled[lead] = precordialBase.map(v => v * scale);
+    }
+  }
+
+  // Ensure all leads exist
+  for (const lead of LEAD_NAMES) {
+    if (!(lead in filled)) {
+      filled[lead] = new Array(sampleCount).fill(0);
+    }
+  }
+
+  return filled;
 }
 
 async function loadImageFromURL(url) {
   showStatus('Loading image from URL...', 'info', 0);
 
   try {
-    // Handle data URLs directly
-    if (url.startsWith('data:image')) {
-      const img = new Image();
-      img.onload = function() {
-        uploadedImage = img;
-        uploadedImageName = 'web-image.png';
-        imageMode = true;
-        imageCalibration = null;
-
-        const detected = detectGridSpacing(img);
-        if (detected && detected.confidence > 0.6) {
-          imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-url' };
-          showStatus('ECG loaded with auto-calibration!', 'success');
-        } else {
-          showStatus('ECG loaded - click Calibrate for measurements', 'info');
-        }
-
-        document.getElementById('calibrationControls').style.display = 'block';
-        document.getElementById('caseInfo').textContent = 'Web image';
-        redraw();
-      };
-      img.onerror = () => showStatus('Failed to load image', 'error');
-      img.src = url;
-      return;
+    const img = new Image();
+    if (!url.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
     }
 
-    // For external URLs, try to fetch (may fail due to CORS)
-    // First try direct load
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-
     img.onload = function() {
-      uploadedImage = img;
-      uploadedImageName = url.split('/').pop() || 'web-image.png';
-      imageMode = true;
-      imageCalibration = null;
-
-      const detected = detectGridSpacing(img);
-      if (detected && detected.confidence > 0.6) {
-        imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-url' };
-        showStatus('ECG loaded with auto-calibration!', 'success');
-      } else {
-        showStatus('ECG loaded - click Calibrate for measurements', 'info');
-      }
-
-      document.getElementById('calibrationControls').style.display = 'block';
-      document.getElementById('caseInfo').textContent = uploadedImageName;
-      redraw();
+      const name = url.startsWith('data:') ? 'pasted-image.png' : (url.split('/').pop() || 'web-image.png');
+      processImportedImage(img, name);
     };
 
     img.onerror = () => {
-      // CORS blocked - try proxy or show message
       showStatus('Could not load image (CORS). Try: copy image, then Cmd+V', 'warning');
     };
 
