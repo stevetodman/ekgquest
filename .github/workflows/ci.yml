@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  test-js:
+    name: JavaScript Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -18,10 +19,55 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Run tests
+      - name: Run JS tests
         run: npm test
 
+  realism-lab:
+    name: Realism Quality Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy pandas pytest
+
+      - name: Generate golden seed cases
+        run: |
+          node tools/generate_synth_cases.mjs \
+            --config python/configs/eval_matrix.json \
+            --out python/outputs/cases \
+            --golden
+
+      - name: Run realism evaluation
+        run: |
+          python -m realism_lab.eval_realism \
+            --cases-dir python/outputs/cases \
+            --config python/configs/eval_matrix.json \
+            --output python/outputs/realism_report.json
+        working-directory: python
+
+      - name: Upload realism report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: realism-report
+          path: python/outputs/realism_report.json
+
   lint-html:
+    name: Static Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -38,4 +84,12 @@ jobs:
           test -f viewer/js/ecg-core.js
           test -f viewer/js/ecg-synth.js
           test -f viewer/js/ecg-worker.js
+          test -f viewer/js/ecg-synth-modules.js
           echo "JS modules verified"
+
+      - name: Check Python module structure
+        run: |
+          test -f python/realism_lab/__init__.py
+          test -f python/realism_lab/metrics.py
+          test -f python/realism_lab/eval_realism.py
+          echo "Python modules verified"

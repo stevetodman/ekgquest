@@ -1,0 +1,26 @@
+# EKGQuest Realism Lab Dependencies
+# Core scientific stack
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# ECG-specific tools
+wfdb>=4.1.0
+neurokit2>=0.2.0
+
+# Visualization (optional but useful)
+matplotlib>=3.7.0
+
+# Testing
+pytest>=7.3.0
+pytest-cov>=4.1.0
+
+# CLI and reporting
+rich>=13.0.0
+jinja2>=3.1.0
+
+# Schema validation
+pydantic>=2.0.0
+
+# For optimization (calibration)
+# cma>=3.3.0  # Optional: CMA-ES optimizer
