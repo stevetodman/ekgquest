@@ -52,9 +52,20 @@ Goal: world-class ECG teaching lab — MUSE-style viewing/printing + explainable
 - Immediate feedback with correct/incorrect highlighting
 - Next case button for continuous practice
 
-## In Progress
-- M8: Multi-case session scoring + progress tracking
-- M9: PDF report export with measurements
+### M8: Multi-case session scoring ✅
+- Session tracking bar (Cases, Correct, Accuracy, Streak)
+- Progress persisted to localStorage
+- Streak badges for motivation (3+, 5+, 10+ streaks)
+- Session reset button
+- Automatic recording for both quiz modes (measurements & morphology)
+
+### M9: PDF report export ✅
+- "Generate Report" button in toolbar
+- Report modal with patient info, measurements, interpretation
+- Automated interpretation based on measurements (brady/tachy, axis deviation, etc.)
+- 12-lead ECG rendering in report canvas
+- Print/PDF export via browser print dialog
+- Educational disclaimer in all exports
 
 ---
 

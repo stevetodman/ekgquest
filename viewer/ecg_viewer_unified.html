@@ -103,6 +103,49 @@
   .morphology-result{font-size:14px;font-weight:600;min-height:20px}
   .morphology-result.correct{color:var(--ok)}
   .morphology-result.incorrect{color:var(--warn)}
+  .session-bar{
+    display:none;gap:16px;align-items:center;
+    background:linear-gradient(135deg,#f0f7ff,#e8f2ff);
+    border:1px solid #c5d9f5;border-radius:12px;
+    padding:10px 14px;margin:10px 0 12px 0;
+  }
+  .session-stat{display:flex;flex-direction:column;gap:2px}
+  .session-stat .label{font-size:11px;color:var(--muted)}
+  .session-stat .value{font-size:16px;font-weight:700;color:var(--text)}
+  .session-stat .value.good{color:var(--ok)}
+  .session-stat .value.fair{color:#b8860b}
+  .session-stat .value.poor{color:var(--warn)}
+  .session-actions{display:flex;gap:8px;margin-left:auto}
+  .session-actions button{font-size:12px;padding:6px 10px}
+  .streak-badge{
+    display:inline-flex;align-items:center;gap:4px;
+    background:#fff4d6;border:1px solid #f1d08c;border-radius:999px;
+    padding:4px 10px;font-size:12px;font-weight:600;color:#8a5a00;
+  }
+  .streak-badge.hot{background:#ffe4e8;border-color:#f0b6c0;color:#b00020}
+  .report-overlay{
+    display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.5);z-index:1000;
+    justify-content:center;align-items:flex-start;padding:20px;overflow:auto;
+  }
+  .report-container{
+    background:white;border-radius:16px;max-width:900px;width:100%;
+    box-shadow:0 8px 32px rgba(0,0,0,0.2);
+  }
+  .report-header{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:16px 20px;border-bottom:1px solid var(--border);
+  }
+  .report-header h3{margin:0;font-size:18px}
+  .report-body{padding:20px}
+  .report-section{margin-bottom:20px}
+  .report-section h4{margin:0 0 10px 0;font-size:14px;color:var(--muted);border-bottom:1px solid var(--border);padding-bottom:6px}
+  .report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .report-item{background:#f8f8f8;border-radius:8px;padding:10px}
+  .report-item .label{font-size:11px;color:var(--muted)}
+  .report-item .value{font-size:16px;font-weight:600}
+  .report-canvas{width:100%;border:1px solid var(--border);border-radius:8px;margin-top:12px}
+  .report-footer{padding:16px 20px;border-top:1px solid var(--border);text-align:center;font-size:11px;color:var(--muted)}
   @media print{
     body{margin:0;background:white;}
     .bar,.masthead{page-break-inside:avoid;box-shadow:none;}
@@ -146,6 +189,29 @@
       <option value="">Any</option>
     </select>
   </label>
+</div>
+
+<div class="session-bar" id="sessionBar">
+  <div class="session-stat">
+    <div class="label">Cases</div>
+    <div class="value" id="sessionCases">0</div>
+  </div>
+  <div class="session-stat">
+    <div class="label">Correct</div>
+    <div class="value" id="sessionCorrect">0</div>
+  </div>
+  <div class="session-stat">
+    <div class="label">Accuracy</div>
+    <div class="value" id="sessionAccuracy">—</div>
+  </div>
+  <div class="session-stat">
+    <div class="label">Streak</div>
+    <div class="value" id="sessionStreak">0</div>
+  </div>
+  <div id="streakBadge" class="streak-badge" style="display:none"></div>
+  <div class="session-actions">
+    <button id="resetSessionBtn">Reset Session</button>
+  </div>
 </div>
 
 <div class="masthead">
@@ -201,6 +267,7 @@
   <button id="pngBtn">Export PNG</button>
   <button id="printPngBtn">Export print PNG</button>
   <button id="pdfBtn">Print / PDF</button>
+  <button id="reportBtn">Generate Report</button>
 </div>
 
 <div class="bar measurements-bar" id="measurementsBar" style="width:100%">
@@ -267,6 +334,40 @@
 <div class="wrap"><canvas id="c"></canvas></div>
 <div class="footer" id="footer"></div>
 
+<div class="report-overlay" id="reportOverlay">
+  <div class="report-container">
+    <div class="report-header">
+      <h3>ECG Report</h3>
+      <div style="display:flex;gap:8px">
+        <button id="downloadReportBtn">Download PDF</button>
+        <button id="closeReportBtn">Close</button>
+      </div>
+    </div>
+    <div class="report-body" id="reportBody">
+      <div class="report-section">
+        <h4>Patient Information</h4>
+        <div class="report-grid" id="reportPatientInfo"></div>
+      </div>
+      <div class="report-section">
+        <h4>Measurements</h4>
+        <div class="report-grid" id="reportMeasurements"></div>
+      </div>
+      <div class="report-section">
+        <h4>Interpretation</h4>
+        <div id="reportInterpretation" style="padding:10px;background:#f8f8f8;border-radius:8px;font-size:14px"></div>
+      </div>
+      <div class="report-section">
+        <h4>ECG Tracing</h4>
+        <canvas id="reportCanvas" class="report-canvas"></canvas>
+      </div>
+    </div>
+    <div class="report-footer">
+      EKGQuest Educational ECG Report — For teaching purposes only, not for clinical use<br>
+      Generated: <span id="reportTimestamp"></span>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import {
   fetchECG,
@@ -314,6 +415,16 @@ const elMhWhen = document.getElementById("mhWhen");
 const elPng = document.getElementById("pngBtn");
 const elPrintPng = document.getElementById("printPngBtn");
 const elPdf = document.getElementById("pdfBtn");
+const elReportBtn = document.getElementById("reportBtn");
+const elReportOverlay = document.getElementById("reportOverlay");
+const elReportBody = document.getElementById("reportBody");
+const elReportPatientInfo = document.getElementById("reportPatientInfo");
+const elReportMeasurements = document.getElementById("reportMeasurements");
+const elReportInterpretation = document.getElementById("reportInterpretation");
+const elReportCanvas = document.getElementById("reportCanvas");
+const elReportTimestamp = document.getElementById("reportTimestamp");
+const elDownloadReportBtn = document.getElementById("downloadReportBtn");
+const elCloseReportBtn = document.getElementById("closeReportBtn");
 
 // Mode & Quiz elements
 const elMode = document.getElementById("mode");
@@ -336,6 +447,15 @@ const elMorphologyOptions = document.getElementById("morphologyOptions");
 const elMorphologyResult = document.getElementById("morphologyResult");
 const elCheckMorphologyBtn = document.getElementById("checkMorphologyBtn");
 const elNextMorphologyBtn = document.getElementById("nextMorphologyBtn");
+
+// Session tracking elements
+const elSessionBar = document.getElementById("sessionBar");
+const elSessionCases = document.getElementById("sessionCases");
+const elSessionCorrect = document.getElementById("sessionCorrect");
+const elSessionAccuracy = document.getElementById("sessionAccuracy");
+const elSessionStreak = document.getElementById("sessionStreak");
+const elStreakBadge = document.getElementById("streakBadge");
+const elResetSessionBtn = document.getElementById("resetSessionBtn");
 
 // Quiz inputs
 const qHr = document.getElementById("q_hr");
@@ -407,6 +527,15 @@ let currentMorphologyDx = null;
 let morphologyOptions = [];
 let morphologyAnswered = false;
 
+// Session tracking state
+const session = {
+  totalCases: 0,
+  correctCases: 0,
+  currentStreak: 0,
+  bestStreak: 0,
+  history: [], // { dx, correct, timestamp, mode }
+};
+
 const TEACHING_TIPS = {
   hr: [
     "Heart rate = 60 / RR interval (in seconds)",
@@ -444,6 +573,10 @@ const TEACHING_TIPS = {
 function setMode(mode) {
   currentMode = mode;
   elModeHint.textContent = MODE_HINTS[mode] || "";
+
+  // Show session bar only in quiz modes
+  const isQuizMode = mode === "quiz" || mode === "morphology";
+  elSessionBar.style.display = isQuizMode ? "flex" : "none";
 
   if (mode === "quiz") {
     elMeasurementsBar.style.display = "none";
@@ -588,6 +721,11 @@ function gradeQuiz() {
     elQuizScore.className = "quiz-score needs-work";
   }
 
+  // Record session result (>= 80% is considered correct) - only once per case
+  if (!quizGraded) {
+    recordSessionResult(pct >= 80, "quiz", META?.targets?.dx);
+  }
+
   quizGraded = true;
 }
 
@@ -682,13 +820,17 @@ function checkMorphologyAnswer() {
     }
   });
 
-  if (userAnswer === currentMorphologyDx) {
+  const isCorrect = userAnswer === currentMorphologyDx;
+  if (isCorrect) {
     elMorphologyResult.textContent = "Correct! Well done.";
     elMorphologyResult.className = "morphology-result correct";
   } else {
     elMorphologyResult.textContent = `Incorrect. The answer is: ${currentMorphologyDx}`;
     elMorphologyResult.className = "morphology-result incorrect";
   }
+
+  // Record session result
+  recordSessionResult(isCorrect, "morphology", currentMorphologyDx);
 }
 
 function nextMorphologyCase() {
@@ -697,6 +839,94 @@ function nextMorphologyCase() {
   setTimeout(() => {
     generateMorphologyQuestion();
   }, 100);
+}
+
+// Session tracking functions
+function recordSessionResult(correct, mode, dx) {
+  session.totalCases++;
+  if (correct) {
+    session.correctCases++;
+    session.currentStreak++;
+    if (session.currentStreak > session.bestStreak) {
+      session.bestStreak = session.currentStreak;
+    }
+  } else {
+    session.currentStreak = 0;
+  }
+
+  session.history.push({
+    dx: dx || META?.targets?.dx || "Unknown",
+    correct,
+    timestamp: Date.now(),
+    mode,
+  });
+
+  updateSessionDisplay();
+  saveSessionToStorage();
+}
+
+function updateSessionDisplay() {
+  elSessionCases.textContent = session.totalCases;
+  elSessionCorrect.textContent = session.correctCases;
+
+  if (session.totalCases > 0) {
+    const accuracy = Math.round((session.correctCases / session.totalCases) * 100);
+    elSessionAccuracy.textContent = `${accuracy}%`;
+    elSessionAccuracy.className = "value " + (accuracy >= 80 ? "good" : accuracy >= 60 ? "fair" : "poor");
+  } else {
+    elSessionAccuracy.textContent = "—";
+    elSessionAccuracy.className = "value";
+  }
+
+  elSessionStreak.textContent = session.currentStreak;
+
+  // Show streak badge for notable streaks
+  if (session.currentStreak >= 3) {
+    elStreakBadge.style.display = "inline-flex";
+    if (session.currentStreak >= 10) {
+      elStreakBadge.textContent = `${session.currentStreak} streak!`;
+      elStreakBadge.className = "streak-badge hot";
+    } else if (session.currentStreak >= 5) {
+      elStreakBadge.textContent = `${session.currentStreak} in a row!`;
+      elStreakBadge.className = "streak-badge hot";
+    } else {
+      elStreakBadge.textContent = `${session.currentStreak} streak`;
+      elStreakBadge.className = "streak-badge";
+    }
+  } else {
+    elStreakBadge.style.display = "none";
+  }
+}
+
+function resetSession() {
+  session.totalCases = 0;
+  session.correctCases = 0;
+  session.currentStreak = 0;
+  session.bestStreak = 0;
+  session.history = [];
+  updateSessionDisplay();
+  saveSessionToStorage();
+}
+
+function saveSessionToStorage() {
+  try {
+    localStorage.setItem("ekgquest_session", JSON.stringify(session));
+  } catch (e) {
+    // localStorage not available
+  }
+}
+
+function loadSessionFromStorage() {
+  try {
+    const saved = localStorage.getItem("ekgquest_session");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      Object.assign(session, parsed);
+      updateSessionDisplay();
+    }
+  } catch (e) {
+    // localStorage not available or invalid data
+  }
 }
 
 function loadCasePack(packId) {
@@ -1207,6 +1437,7 @@ elNextCase.onclick = ()=>{
 elRandomCase.onclick = generateNewCase;
 elCheckMorphologyBtn.onclick = checkMorphologyAnswer;
 elNextMorphologyBtn.onclick = nextMorphologyCase;
+elResetSessionBtn.onclick = resetSession;
 
 function exportPrintSnapshot(){
   if(!META) return;
@@ -1253,8 +1484,199 @@ elPdf.onclick = ()=>{
   window.print();
 };
 
+// Report generation functions
+function generateReport() {
+  if (!META) return;
+
+  // Populate patient info
+  const t = META?.targets || {};
+  const synthState = t.synthetic === true ? "SYNTHETIC" : t.synthetic === false ? "REAL DATA" : "UNKNOWN SOURCE";
+  elReportPatientInfo.innerHTML = `
+    <div class="report-item"><div class="label">Patient ID</div><div class="value">${patientId}</div></div>
+    <div class="report-item"><div class="label">Age</div><div class="value">${t.age_years != null ? `${Math.round(t.age_years)} years` : "—"}</div></div>
+    <div class="report-item"><div class="label">Sex</div><div class="value">${t.sex || "—"}</div></div>
+    <div class="report-item"><div class="label">Diagnosis</div><div class="value">${t.dx || "—"}</div></div>
+    <div class="report-item"><div class="label">Recorded</div><div class="value">${recordedAt.toLocaleDateString()}</div></div>
+    <div class="report-item"><div class="label">Data Source</div><div class="value">${synthState}</div></div>
+  `;
+
+  // Populate measurements
+  const m = ANALYSIS?.measures || {};
+  elReportMeasurements.innerHTML = `
+    <div class="report-item"><div class="label">Ventricular Rate</div><div class="value">${fmtBpm(m.hr)}</div></div>
+    <div class="report-item"><div class="label">PR Interval</div><div class="value">${fmtMs(m.PR)}</div></div>
+    <div class="report-item"><div class="label">QRS Duration</div><div class="value">${fmtMs(m.QRS)}</div></div>
+    <div class="report-item"><div class="label">QT Interval</div><div class="value">${fmtMs(m.QT)}</div></div>
+    <div class="report-item"><div class="label">QTc (Bazett)</div><div class="value">${fmtMs(m.QTcB)}</div></div>
+    <div class="report-item"><div class="label">QRS Axis</div><div class="value">${m.axes?.qAxis != null ? `${Math.round(m.axes.qAxis)}°` : "—"}</div></div>
+  `;
+
+  // Generate interpretation
+  const interpretations = [];
+  if (m.hr) {
+    if (m.hr < 60) interpretations.push("Bradycardia");
+    else if (m.hr > 100) interpretations.push("Tachycardia");
+    else interpretations.push("Normal rate");
+  }
+  if (m.PR) {
+    if (m.PR > 200) interpretations.push("First-degree AV block (prolonged PR)");
+    else if (m.PR < 120) interpretations.push("Short PR interval");
+  }
+  if (m.QRS) {
+    if (m.QRS > 120) interpretations.push("Wide QRS complex");
+  }
+  if (m.QTcB) {
+    if (m.QTcB > 460) interpretations.push("Prolonged QTc");
+  }
+  if (m.axes?.qAxis != null) {
+    const axis = m.axes.qAxis;
+    if (axis < -30) interpretations.push("Left axis deviation");
+    else if (axis > 90) interpretations.push("Right axis deviation");
+    else interpretations.push("Normal axis");
+  }
+  if (t.dx && t.dx !== "Normal sinus") {
+    interpretations.unshift(`Diagnosis: ${t.dx}`);
+  }
+  elReportInterpretation.innerHTML = interpretations.length > 0
+    ? interpretations.map(i => `• ${i}`).join("<br>")
+    : "No significant abnormalities detected.";
+
+  // Draw ECG on report canvas
+  drawReportECG();
+
+  // Set timestamp
+  elReportTimestamp.textContent = new Date().toLocaleString();
+
+  // Show overlay
+  elReportOverlay.style.display = "flex";
+}
+
+function drawReportECG() {
+  if (!META) return;
+
+  const reportCtx = elReportCanvas.getContext("2d");
+  const fs = META.fs;
+
+  // Set canvas size
+  elReportCanvas.width = 800;
+  elReportCanvas.height = 400;
+  const w = elReportCanvas.width;
+  const h = elReportCanvas.height;
+
+  // Clear and draw background
+  reportCtx.fillStyle = "#fff7f7";
+  reportCtx.fillRect(0, 0, w, h);
+
+  // Draw grid
+  const pxmm = 3;
+  reportCtx.lineWidth = 0.5;
+  reportCtx.strokeStyle = "rgba(205,40,40,0.18)";
+  reportCtx.beginPath();
+  for (let x = 0; x <= w; x += pxmm) { reportCtx.moveTo(x, 0); reportCtx.lineTo(x, h); }
+  for (let y = 0; y <= h; y += pxmm) { reportCtx.moveTo(0, y); reportCtx.lineTo(w, y); }
+  reportCtx.stroke();
+
+  reportCtx.strokeStyle = "rgba(205,40,40,0.44)";
+  reportCtx.beginPath();
+  for (let x = 0; x <= w; x += pxmm * 5) { reportCtx.moveTo(x, 0); reportCtx.lineTo(x, h); }
+  for (let y = 0; y <= h; y += pxmm * 5) { reportCtx.moveTo(0, y); reportCtx.lineTo(w, y); }
+  reportCtx.stroke();
+
+  // Draw 12-lead grid (3x4)
+  const printGrid = [
+    ["I", "aVR", "V1", "V4"],
+    ["II", "aVL", "V2", "V5"],
+    ["III", "aVF", "V3", "V6"],
+  ];
+  const cols = 4, rows = 3;
+  const leftPad = 30, topPad = 20;
+  const cellW = (w - leftPad * 2) / cols;
+  const cellH = (h - topPad * 2) / rows;
+  const pps = 25 * pxmm; // 25 mm/s
+  const ppu = (10 * pxmm) / 1000; // 10 mm/mV
+
+  reportCtx.font = "10px system-ui";
+  reportCtx.fillStyle = "#444";
+  reportCtx.strokeStyle = "#111";
+  reportCtx.lineWidth = 1;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const lead = printGrid[r][c];
+      const x0 = leftPad + c * cellW;
+      const y0 = topPad + r * cellH;
+      const base = y0 + cellH / 2;
+      const data = META.leads_uV[lead];
+
+      if (!data) continue;
+
+      reportCtx.beginPath();
+      const step = Math.max(1, Math.floor(fs / pps));
+      for (let i = 0; i < data.length; i += step) {
+        const x = x0 + (i / fs) * pps;
+        if (x > x0 + cellW - 5) break;
+        const y = base - data[i] * ppu;
+        if (i === 0) reportCtx.moveTo(x, y);
+        else reportCtx.lineTo(x, y);
+      }
+      reportCtx.stroke();
+      reportCtx.fillText(lead, x0 + 4, y0 + 12);
+    }
+  }
+}
+
+function closeReport() {
+  elReportOverlay.style.display = "none";
+}
+
+function downloadReportAsPDF() {
+  // Use browser print with specific styling for PDF
+  const reportContent = elReportBody.innerHTML;
+  const printWindow = window.open("", "_blank");
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>ECG Report - ${patientId}</title>
+      <style>
+        body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; }
+        h3 { margin: 0 0 20px 0; font-size: 24px; }
+        h4 { margin: 20px 0 10px 0; font-size: 14px; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+        .report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .report-item { background: #f8f8f8; border-radius: 8px; padding: 10px; }
+        .report-item .label { font-size: 11px; color: #666; }
+        .report-item .value { font-size: 16px; font-weight: 600; }
+        .report-canvas { width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+        .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #666; }
+      </style>
+    </head>
+    <body>
+      <h3>ECG Report - ${patientId}</h3>
+      ${reportContent}
+      <div class="footer">
+        EKGQuest Educational ECG Report — For teaching purposes only, not for clinical use<br>
+        Generated: ${new Date().toLocaleString()}
+      </div>
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.print();
+    printWindow.close();
+  }, 250);
+}
+
+elReportBtn.onclick = generateReport;
+elCloseReportBtn.onclick = closeReport;
+elDownloadReportBtn.onclick = downloadReportAsPDF;
+elReportOverlay.onclick = (e) => {
+  if (e.target === elReportOverlay) closeReport();
+};
+
 syncControlLocks();
 populateDxDropdown();
+loadSessionFromStorage();
 loadSample(elSample.value).catch(err=>{
   console.error(err);
   elInfo.textContent = "Failed to load sample";
