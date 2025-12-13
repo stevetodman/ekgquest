@@ -1,0 +1,146 @@
+{
+  "version": "1.0.0",
+  "description": "Golden seeds for regression testing synthetic ECG generation",
+  "seeds": [
+    {
+      "id": "neonate_normal",
+      "age_years": 0.1,
+      "dx": "Normal sinus",
+      "seed": 10001,
+      "description": "Neonate normal sinus rhythm"
+    },
+    {
+      "id": "infant_normal",
+      "age_years": 1,
+      "dx": "Normal sinus",
+      "seed": 10002,
+      "description": "Infant normal sinus rhythm"
+    },
+    {
+      "id": "toddler_normal",
+      "age_years": 4,
+      "dx": "Normal sinus",
+      "seed": 10003,
+      "description": "Toddler normal sinus rhythm"
+    },
+    {
+      "id": "school_normal",
+      "age_years": 8,
+      "dx": "Normal sinus",
+      "seed": 10004,
+      "description": "School-age normal sinus rhythm"
+    },
+    {
+      "id": "adolescent_normal",
+      "age_years": 15,
+      "dx": "Normal sinus",
+      "seed": 10005,
+      "description": "Adolescent normal sinus rhythm"
+    },
+    {
+      "id": "adult_normal",
+      "age_years": 35,
+      "dx": "Normal sinus",
+      "seed": 10006,
+      "description": "Adult normal sinus rhythm"
+    },
+    {
+      "id": "wpw_child",
+      "age_years": 8,
+      "dx": "WPW",
+      "seed": 20001,
+      "description": "Child with WPW pattern"
+    },
+    {
+      "id": "rbbb_child",
+      "age_years": 8,
+      "dx": "RBBB",
+      "seed": 20002,
+      "description": "Child with RBBB"
+    },
+    {
+      "id": "lbbb_adult",
+      "age_years": 35,
+      "dx": "LBBB",
+      "seed": 20003,
+      "description": "Adult with LBBB"
+    },
+    {
+      "id": "lvh_child",
+      "age_years": 8,
+      "dx": "LVH",
+      "seed": 20004,
+      "description": "Child with LVH"
+    },
+    {
+      "id": "rvh_neonate",
+      "age_years": 0.5,
+      "dx": "RVH",
+      "seed": 20005,
+      "description": "Neonate with RVH (physiologic variant)"
+    },
+    {
+      "id": "svt_child",
+      "age_years": 8,
+      "dx": "SVT (narrow)",
+      "seed": 30001,
+      "description": "Child with SVT"
+    },
+    {
+      "id": "flutter_adult",
+      "age_years": 35,
+      "dx": "Atrial flutter (2:1)",
+      "seed": 30002,
+      "description": "Adult with atrial flutter"
+    },
+    {
+      "id": "avb1_child",
+      "age_years": 8,
+      "dx": "1st degree AVB",
+      "seed": 30003,
+      "description": "Child with 1st degree AVB"
+    },
+    {
+      "id": "avb2_wencke",
+      "age_years": 15,
+      "dx": "2nd degree AVB (Wenckebach)",
+      "seed": 30004,
+      "description": "Adolescent with Wenckebach"
+    },
+    {
+      "id": "avb3_adult",
+      "age_years": 35,
+      "dx": "3rd degree AVB",
+      "seed": 30005,
+      "description": "Adult with complete heart block"
+    },
+    {
+      "id": "longqt_child",
+      "age_years": 8,
+      "dx": "Long QT",
+      "seed": 40001,
+      "description": "Child with Long QT syndrome"
+    },
+    {
+      "id": "pacs_child",
+      "age_years": 8,
+      "dx": "PACs",
+      "seed": 40002,
+      "description": "Child with PACs"
+    },
+    {
+      "id": "pvcs_adult",
+      "age_years": 35,
+      "dx": "PVCs",
+      "seed": 40003,
+      "description": "Adult with PVCs"
+    },
+    {
+      "id": "brady_adult",
+      "age_years": 35,
+      "dx": "Sinus bradycardia",
+      "seed": 40004,
+      "description": "Adult with sinus bradycardia"
+    }
+  ]
+}

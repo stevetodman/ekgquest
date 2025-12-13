@@ -872,10 +872,11 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
 }
 
 // ============================================================================
-// MODULE 3: LEAD FIELD MODEL
-// Projects VCG to electrode potentials using forward model
-// Input: VCG, torsoParams, electrodeParams
-// Output: electrodePotentials object
+// MODULE 3: LEAD FIELD MODEL (Step 4: Improved)
+// Projects VCG to electrode potentials using forward model with:
+// - Parameterized heart orientation (age-dependent)
+// - Heart position variability
+// - Realistic chest lead progression
 // ============================================================================
 
 // Default electrode geometry (simplified forward model)
@@ -894,6 +895,128 @@ export const DEFAULT_ELECTRODE_GEOMETRY = {
   V7: norm([1.05, 0.2, -0.35]),
 };
 
+/**
+ * Get age-dependent heart orientation parameters
+ * Heart position and orientation change with age:
+ * - Neonates: More horizontal, right-shifted
+ * - Children: Gradually more vertical
+ * - Adults: Standard position
+ * @param {number} ageY - Age in years
+ * @returns {Object} Heart orientation parameters (angles in radians)
+ */
+export function getHeartOrientationParams(ageY) {
+  // Heart rotation angles (Euler angles: roll, pitch, yaw)
+  // Roll (α): rotation around anterior-posterior axis
+  // Pitch (β): rotation around left-right axis
+  // Yaw (γ): rotation around superior-inferior axis
+
+  if (ageY < 1) {
+    // Neonates: heart more horizontal, rightward
+    return {
+      roll: 0.15,      // ~8.5° more horizontal
+      pitch: 0.08,     // slight anterior tilt
+      yaw: 0.12,       // rightward rotation
+      rollVar: 0.08,   // variation
+      pitchVar: 0.05,
+      yawVar: 0.06,
+    };
+  } else if (ageY < 6) {
+    // Toddlers/preschool: transitioning
+    return {
+      roll: 0.10,
+      pitch: 0.05,
+      yaw: 0.08,
+      rollVar: 0.07,
+      pitchVar: 0.04,
+      yawVar: 0.05,
+    };
+  } else if (ageY < 12) {
+    // School age: approaching adult
+    return {
+      roll: 0.05,
+      pitch: 0.03,
+      yaw: 0.04,
+      rollVar: 0.06,
+      pitchVar: 0.03,
+      yawVar: 0.04,
+    };
+  } else {
+    // Adolescent/adult: standard orientation
+    return {
+      roll: 0.0,
+      pitch: 0.0,
+      yaw: 0.0,
+      rollVar: 0.05,
+      pitchVar: 0.03,
+      yawVar: 0.03,
+    };
+  }
+}
+
+/**
+ * Create 3D rotation matrix from Euler angles (ZYX convention)
+ * @param {number} roll - rotation around X axis
+ * @param {number} pitch - rotation around Y axis
+ * @param {number} yaw - rotation around Z axis
+ * @returns {Array} 3x3 rotation matrix as flat array
+ */
+export function createRotationMatrix(roll, pitch, yaw) {
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+
+  // ZYX Euler rotation matrix
+  return [
+    cy * cp,                      cy * sp * sr - sy * cr,       cy * sp * cr + sy * sr,
+    sy * cp,                      sy * sp * sr + cy * cr,       sy * sp * cr - cy * sr,
+    -sp,                          cp * sr,                      cp * cr
+  ];
+}
+
+/**
+ * Apply rotation matrix to a 3D vector
+ */
+function rotateVector(R, v) {
+  return [
+    R[0] * v[0] + R[1] * v[1] + R[2] * v[2],
+    R[3] * v[0] + R[4] * v[1] + R[5] * v[2],
+    R[6] * v[0] + R[7] * v[1] + R[8] * v[2],
+  ];
+}
+
+/**
+ * Apply rotation to VCG signals (rotate dipole orientation)
+ */
+function rotateVCG(Vx, Vy, Vz, R) {
+  const N = Vx.length;
+  const VxR = new Float64Array(N);
+  const VyR = new Float64Array(N);
+  const VzR = new Float64Array(N);
+
+  for (let i = 0; i < N; i++) {
+    VxR[i] = R[0] * Vx[i] + R[1] * Vy[i] + R[2] * Vz[i];
+    VyR[i] = R[3] * Vx[i] + R[4] * Vy[i] + R[5] * Vz[i];
+    VzR[i] = R[6] * Vx[i] + R[7] * Vy[i] + R[8] * Vz[i];
+  }
+
+  return { Vx: VxR, Vy: VyR, Vz: VzR };
+}
+
+/**
+ * Generate random heart orientation based on age
+ */
+export function generateHeartOrientation(ageY, seed) {
+  const rng = mulberry32(seed + 5000);
+  const params = getHeartOrientationParams(ageY);
+
+  // Base orientation + random variation
+  const roll = params.roll + randn(rng) * params.rollVar;
+  const pitch = params.pitch + randn(rng) * params.pitchVar;
+  const yaw = params.yaw + randn(rng) * params.yawVar;
+
+  return { roll, pitch, yaw };
+}
+
 function dotDipole(Vx, Vy, Vz, r) {
   const out = new Float64Array(Vx.length);
   for (let i = 0; i < out.length; i++) {
@@ -902,8 +1025,28 @@ function dotDipole(Vx, Vy, Vz, r) {
   return out;
 }
 
-export function leadFieldModel(vcg, electrodeGeometry = DEFAULT_ELECTRODE_GEOMETRY) {
-  const { Vx, Vy, Vz } = vcg;
+/**
+ * Enhanced lead field model with heart orientation
+ * @param {Object} vcg - VCG signals { Vx, Vy, Vz }
+ * @param {Object} electrodeGeometry - Electrode direction vectors
+ * @param {Object} options - Additional options
+ * @param {number} options.ageY - Age for orientation priors
+ * @param {number} options.seed - Random seed for orientation
+ * @param {boolean} options.applyRotation - Whether to apply heart rotation (default true)
+ */
+export function leadFieldModel(vcg, electrodeGeometry = DEFAULT_ELECTRODE_GEOMETRY, options = {}) {
+  let { Vx, Vy, Vz } = vcg;
+  const { ageY = 30, seed = 42, applyRotation = true } = options;
+
+  // Apply heart orientation rotation if enabled
+  if (applyRotation) {
+    const orientation = generateHeartOrientation(ageY, seed);
+    const R = createRotationMatrix(orientation.roll, orientation.pitch, orientation.yaw);
+    const rotated = rotateVCG(Vx, Vy, Vz, R);
+    Vx = rotated.Vx;
+    Vy = rotated.Vy;
+    Vz = rotated.Vz;
+  }
 
   return {
     phiRA: dotDipole(Vx, Vy, Vz, electrodeGeometry.RA),
@@ -1134,8 +1277,8 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
   // Module 2: Morphology
   const vcg = morphologyModel(beatSchedule, params, dx, fs, N, seed);
 
-  // Module 3: Lead Field
-  const electrodePotentials = leadFieldModel(vcg, electrodeGeometry);
+  // Module 3: Lead Field (with age-dependent heart orientation)
+  const electrodePotentials = leadFieldModel(vcg, electrodeGeometry, { ageY, seed });
 
   // Module 5: Device and Artifact (includes deriving leads)
   const leads = deviceAndArtifactModel(

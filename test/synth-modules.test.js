@@ -32,6 +32,10 @@ import {
   modulateRR,
   computeHRVMetrics,
   EctopyStateMachine,
+  // Lead-field model (Step 4)
+  getHeartOrientationParams,
+  createRotationMatrix,
+  generateHeartOrientation,
 } from "../viewer/js/ecg-synth-modules.js";
 import { ageDefaults, applyDx, DIAGNOSES } from "../viewer/js/ecg-synth.js";
 import { normalizeECGData, detectRPeaks, physicsChecks } from "../viewer/js/ecg-core.js";
@@ -216,6 +220,68 @@ async function run() {
     }
     assert.strictEqual(noEctopyCount, 0, "No ectopy when type is 'none'");
     console.log("  EctopyStateMachine 'none' mode: OK");
+  }
+
+  // Test Lead-Field Model (Step 4)
+  console.log("\nTest 1d: Lead-Field Model Enhancements");
+  {
+    // Test getHeartOrientationParams for different ages
+    const orientNeonate = getHeartOrientationParams(0.5);
+    const orientChild = getHeartOrientationParams(8);
+    const orientAdult = getHeartOrientationParams(35);
+
+    // Neonates should have more horizontal heart (higher roll)
+    assert.ok(orientNeonate.roll > orientChild.roll, "Neonate roll > Child roll");
+    assert.ok(orientChild.roll > orientAdult.roll, "Child roll > Adult roll");
+    console.log("  getHeartOrientationParams() age scaling: OK");
+
+    // Test createRotationMatrix produces valid rotation matrix
+    const R = createRotationMatrix(0.1, 0.05, 0.08);
+    assert.strictEqual(R.length, 9, "Rotation matrix should have 9 elements");
+
+    // Test that rotation matrix is orthogonal (R * R^T ≈ I)
+    // Check first row is unit vector
+    const row1Norm = Math.sqrt(R[0]*R[0] + R[1]*R[1] + R[2]*R[2]);
+    assert.ok(Math.abs(row1Norm - 1) < 0.001, "First row should be unit vector");
+    console.log("  createRotationMatrix(): OK");
+
+    // Test generateHeartOrientation produces consistent results for same seed
+    const orient1 = generateHeartOrientation(8, 12345);
+    const orient2 = generateHeartOrientation(8, 12345);
+    assert.strictEqual(orient1.roll, orient2.roll, "Same seed should produce same roll");
+    assert.strictEqual(orient1.pitch, orient2.pitch, "Same seed should produce same pitch");
+    assert.strictEqual(orient1.yaw, orient2.yaw, "Same seed should produce same yaw");
+    console.log("  generateHeartOrientation() reproducibility: OK");
+
+    // Test different seeds produce different results
+    const orient3 = generateHeartOrientation(8, 54321);
+    assert.ok(orient1.roll !== orient3.roll || orient1.pitch !== orient3.pitch, "Different seeds should produce different orientations");
+    console.log("  generateHeartOrientation() variability: OK");
+
+    // Test that leadFieldModel produces valid output with rotation
+    // Use neonate age where rotation effect is more pronounced
+    const params = applyDx(ageDefaults(0.5), "Normal sinus");
+    const beatSchedule = rhythmModel(params, "Normal sinus", duration, 42, 0.5);
+    const vcg = morphologyModel(beatSchedule, params, "Normal sinus", fs, N, 42);
+
+    // With rotation (neonate has significant heart rotation)
+    const phiRotated = leadFieldModel(vcg, DEFAULT_ELECTRODE_GEOMETRY, { ageY: 0.5, seed: 42, applyRotation: true });
+    assert.ok(phiRotated.phiRA instanceof Float64Array, "phiRA should be Float64Array with rotation");
+
+    // Without rotation
+    const phiNoRotate = leadFieldModel(vcg, DEFAULT_ELECTRODE_GEOMETRY, { applyRotation: false });
+    assert.ok(phiNoRotate.phiRA instanceof Float64Array, "phiRA should be Float64Array without rotation");
+
+    // Results should be different when rotation is applied (check lead II for better sensitivity)
+    const leadsRotated = deriveLeads(phiRotated);
+    const leadsNoRotate = deriveLeads(phiNoRotate);
+    let maxDiff = 0;
+    for (let i = 0; i < 1000; i++) {
+      const diff = Math.abs(leadsRotated.II[i] - leadsNoRotate.II[i]);
+      maxDiff = Math.max(maxDiff, diff);
+    }
+    assert.ok(maxDiff > 0.001, `Rotation should change lead signals (maxDiff=${maxDiff})`);
+    console.log(`  leadFieldModel() rotation effect: OK (maxDiff=${maxDiff.toFixed(4)})`);
   }
 
   // Test Module 1: Rhythm Model

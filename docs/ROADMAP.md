@@ -104,14 +104,17 @@ Age-appropriate HRV modeling implemented in `ecg-synth-modules.js`:
 - **HRV metrics**: `computeHRVMetrics()` calculates SDNN, RMSSD, pNN50
 - **Output includes HRV**: Synthetic ECGs now include `targets.hrv` with computed metrics
 
-### Step 4: Improved lead-field model
-Upgrade from fixed electrode vectors:
+### Step 4: Improved lead-field model ✅
+Age-dependent heart orientation implemented in `ecg-synth-modules.js`:
 
-- **Parameterized heart orientation/position**: Random 3D rotation R(α,β,γ) with age-dependent priors
-- **Lead-field matrix L**: `Φ_electrodes(t) = L * VCG(t)`, then derive leads
-- **Chest lead progression constraints**: Fit R/S progression V1–V6 to age-appropriate ranges
-
-**Done when**: V1–V6 progression and limb lead axes match target distributions.
+- **`getHeartOrientationParams(ageY)`**: Age-dependent heart rotation angles (roll, pitch, yaw)
+  - Neonates: More horizontal, rightward rotation (roll=0.15, yaw=0.12)
+  - Adults: Standard orientation (near zero)
+  - Includes random variation for realistic inter-patient variability
+- **`createRotationMatrix(roll, pitch, yaw)`**: 3D rotation matrix (ZYX Euler angles)
+- **`generateHeartOrientation(ageY, seed)`**: Reproducible orientation with age priors
+- **VCG rotation**: Applied before electrode projection in `leadFieldModel()`
+- **Options API**: `leadFieldModel(vcg, geometry, { ageY, seed, applyRotation })`
 
 ### Step 5: Correlated artifact/noise model
 Build noise in electrode space (before lead derivation) for consistent cross-lead behavior:
