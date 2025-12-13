@@ -6,10 +6,11 @@
 <title>EKGQuest Lab — Teaching ECG Laboratory</title>
 <style>
   :root {
-    --paper: #fff7f7;
-    --trace: #111;
-    --grid1: rgba(205,40,40,0.18);
-    --grid5: rgba(205,40,40,0.44);
+    --paper: #fef9f5;
+    --paper-dark: #fdf5ee;
+    --trace: #1a1a1a;
+    --grid1: rgba(190,50,50,0.22);
+    --grid5: rgba(180,40,40,0.52);
     --text: #141414;
     --muted: #5c5c5c;
     --panel: #ffffff;
@@ -26,13 +27,25 @@
     --teach-border: #a0c8f0;
   }
 
+  /* Clinical ECG font stack - prefer monospace for measurements */
+  @font-face {
+    font-family: 'ECG';
+    src: local('Courier New'), local('Consolas'), local('Liberation Mono');
+  }
+
   * { box-sizing: border-box; }
   body {
     background: #f3f3f3;
     color: var(--text);
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     margin: 0;
     padding: 16px;
+  }
+
+  /* Clinical monospace for ECG labels and measurements */
+  .ecg-label, .metric-value, #caseInfo {
+    font-family: 'Courier New', Consolas, 'Liberation Mono', monospace;
+    letter-spacing: -0.5px;
   }
 
   /* Header */
@@ -62,6 +75,33 @@
   .header-info {
     font-size: 12px;
     color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* Status messages */
+  .status-msg {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: none;
+  }
+  .status-msg.visible { display: inline-block; }
+  .status-msg.error {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+  }
+  .status-msg.success {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+  }
+  .status-msg.info {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
   }
 
   /* Mode Toggle */
@@ -371,6 +411,25 @@
     cursor: grabbing;
   }
 
+  /* Focus styles for accessibility */
+  button:focus-visible, select:focus-visible, input:focus-visible, .tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Skip link for keyboard users */
+  .skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--accent);
+    color: white;
+    padding: 8px 16px;
+    z-index: 100;
+    border-radius: 0 0 8px 0;
+  }
+  .skip-link:focus { top: 0; }
+
   /* Advanced Section */
   .advanced-toggle {
     display: flex;
@@ -381,8 +440,14 @@
     cursor: pointer;
     padding: 6px 10px;
     border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
   }
   .advanced-toggle:hover { background: var(--btn); }
+  .advanced-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .advanced-content {
     display: none;
     flex-wrap: wrap;
@@ -412,24 +477,28 @@
 </head>
 <body>
 
+<!-- Skip link for keyboard navigation -->
+<a href="#ecgCanvas" class="skip-link">Skip to ECG</a>
+
 <!-- Header -->
-<div class="header">
+<header class="header" role="banner">
   <div style="display:flex; align-items:center; gap:12px">
     <h1>EKGQuest Lab</h1>
-    <span class="header-badge badge-synth" id="sourceBadge">SYNTHETIC</span>
+    <span class="header-badge badge-synth" id="sourceBadge" role="status" aria-live="polite">SYNTHETIC</span>
   </div>
 
-  <div class="mode-toggle">
-    <button class="mode-btn active-quiz" id="quizModeBtn" onclick="setMode('quiz')">Quiz Mode</button>
-    <button class="mode-btn" id="teachModeBtn" onclick="setMode('teach')">Teach Mode</button>
+  <div class="mode-toggle" role="group" aria-label="Display mode">
+    <button class="mode-btn active-quiz" id="quizModeBtn" onclick="setMode('quiz')" aria-pressed="true">Quiz Mode</button>
+    <button class="mode-btn" id="teachModeBtn" onclick="setMode('teach')" aria-pressed="false">Teach Mode</button>
   </div>
 
-  <button class="reveal-btn" id="revealBtn" onclick="reveal()">Reveal Answers</button>
+  <button class="reveal-btn" id="revealBtn" onclick="reveal()" aria-label="Reveal diagnosis and measurements">Reveal Answers</button>
 
   <div class="header-info">
     <span id="caseInfo">No case loaded</span>
+    <span id="statusMsg" class="status-msg" role="status" aria-live="polite"></span>
   </div>
-</div>
+</header>
 
 <!-- Tabs -->
 <div class="tabs">
@@ -444,7 +513,14 @@
   <!-- Case Panel -->
   <div class="tab-panel active" id="panel-case">
     <label>Age (years)
-      <input id="ageYears" type="number" min="0" max="25" step="0.1" value="4">
+      <input id="ageYears" type="number" min="0" max="100" step="0.1" value="45">
+    </label>
+    <label>Sex
+      <select id="sex">
+        <option value="">Any</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+      </select>
     </label>
     <label>Diagnosis
       <select id="dx">
@@ -523,9 +599,9 @@
       </select>
     </label>
     <div class="divider"></div>
-    <span class="advanced-toggle" onclick="toggleAdvanced()">
-      <span id="advIcon">+</span> Advanced
-    </span>
+    <button type="button" class="advanced-toggle" onclick="toggleAdvanced()" aria-expanded="false" aria-controls="advancedContent">
+      <span id="advIcon" aria-hidden="true">+</span> Advanced
+    </button>
     <div class="advanced-content" id="advancedContent">
       <label><input id="noise" type="checkbox" checked onchange="generate()"> Noise</label>
       <label><input id="filters" type="checkbox" checked onchange="generate()"> Diagnostic filter</label>
@@ -571,13 +647,13 @@
     <div class="metric"><div class="metric-label">QTc (Bazett)</div><div class="metric-value" id="m_qtc">—</div></div>
     <div class="metric"><div class="metric-label">Axes (P/QRS/T)</div><div class="metric-value" id="m_axes">—</div></div>
     <div class="metric" id="diagnosisMetric"><div class="metric-label">Diagnosis</div><div class="metric-value" id="m_dx">—</div></div>
-    <div class="metric"><div class="metric-label">Age</div><div class="metric-value" id="m_age">—</div></div>
+    <div class="metric"><div class="metric-label">Age/Sex</div><div class="metric-value" id="m_age">—</div></div>
   </div>
 </div>
 
 <!-- ECG Canvas -->
-<div class="canvas-wrap">
-  <canvas id="c"></canvas>
+<div class="canvas-wrap" id="ecgCanvas" role="img" aria-label="Electrocardiogram display">
+  <canvas id="c" tabindex="0" aria-label="ECG waveform - use calipers to measure intervals"></canvas>
 </div>
 
 <!-- Caliper Measurements List -->
@@ -633,15 +709,46 @@ const CALIPER_COLORS = ['#1b6dff', '#e91e63', '#4caf50', '#ff9800', '#9c27b0', '
 let nextCaliperColor = 0;
 
 // ============================================================================
+// STATUS MESSAGES
+// ============================================================================
+
+let statusTimeout = null;
+function showStatus(message, type = 'info', duration = 4000) {
+  const el = document.getElementById('statusMsg');
+  if (!el) return;
+
+  // Clear previous timeout
+  if (statusTimeout) clearTimeout(statusTimeout);
+
+  el.textContent = message;
+  el.className = `status-msg visible ${type}`;
+
+  if (duration > 0) {
+    statusTimeout = setTimeout(() => {
+      el.className = 'status-msg';
+    }, duration);
+  }
+}
+
+function clearStatus() {
+  const el = document.getElementById('statusMsg');
+  if (el) el.className = 'status-msg';
+}
+
+// ============================================================================
 // MODE MANAGEMENT
 // ============================================================================
 
 window.setMode = function(mode) {
   currentMode = mode;
 
-  // Update buttons
-  document.getElementById('quizModeBtn').className = mode === 'quiz' ? 'mode-btn active-quiz' : 'mode-btn';
-  document.getElementById('teachModeBtn').className = mode === 'teach' ? 'mode-btn active-teach' : 'mode-btn';
+  // Update buttons and aria-pressed state
+  const quizBtn = document.getElementById('quizModeBtn');
+  const teachBtn = document.getElementById('teachModeBtn');
+  quizBtn.className = mode === 'quiz' ? 'mode-btn active-quiz' : 'mode-btn';
+  teachBtn.className = mode === 'teach' ? 'mode-btn active-teach' : 'mode-btn';
+  quizBtn.setAttribute('aria-pressed', mode === 'quiz');
+  teachBtn.setAttribute('aria-pressed', mode === 'teach');
 
   // Update reveal button visibility
   document.getElementById('revealBtn').className = mode === 'quiz' ? 'reveal-btn visible' : 'reveal-btn';
@@ -676,12 +783,17 @@ window.showTab = function(tabId) {
 window.toggleAdvanced = function() {
   const content = document.getElementById('advancedContent');
   const icon = document.getElementById('advIcon');
-  if (content.classList.contains('open')) {
+  const btn = document.querySelector('.advanced-toggle');
+  const isOpen = content.classList.contains('open');
+
+  if (isOpen) {
     content.classList.remove('open');
     icon.textContent = '+';
+    btn?.setAttribute('aria-expanded', 'false');
   } else {
     content.classList.add('open');
     icon.textContent = '−';
+    btn?.setAttribute('aria-expanded', 'true');
   }
 };
 
@@ -699,7 +811,8 @@ async function ensureSynth() {
 window.generate = async function() {
   const synth = await ensureSynth();
 
-  const age = parseFloat(document.getElementById('ageYears').value) || 4;
+  const age = parseFloat(document.getElementById('ageYears').value) || 45;
+  const sex = document.getElementById('sex').value || null;
   const dx = document.getElementById('dx').value;
   const seed = parseInt(document.getElementById('seed').value) || 7;
   const noiseEnabled = document.getElementById('noise').checked;
@@ -710,7 +823,7 @@ window.generate = async function() {
   const duration = 10;
   const N = fs * duration;
 
-  const params = synth.generateAgeAppropriateParams(age, dx, seed);
+  const params = synth.applyDx(synth.ageDefaults(age, sex), dx);
   const beatSchedule = synth.rhythmModel(params, dx, fs, duration, seed);
   const { Vx, Vy, Vz } = synth.morphologyModel(beatSchedule, params, dx, fs, N, seed);
   const leads = synth.leadFieldModel(Vx, Vy, Vz, fs, seed, params);
@@ -730,6 +843,7 @@ window.generate = async function() {
       synthetic: true,
       generator_version: "2.0-lab",
       age_years: age,
+      sex: sex,
       dx: dx,
       HR_bpm: params.HR,
       PR_ms: Math.round(params.PR * 1000),
@@ -740,6 +854,7 @@ window.generate = async function() {
   };
 
   updateAfterLoad();
+  showStatus('ECG generated', 'success', 2000);
 };
 
 window.randomize = function() {
@@ -759,8 +874,9 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
     const text = await file.text();
     ecgData = JSON.parse(text);
     updateAfterLoad();
+    showStatus('File loaded successfully', 'success');
   } catch (err) {
-    alert('Failed to load file: ' + err.message);
+    showStatus('Failed to load file: ' + err.message, 'error', 6000);
   }
 });
 
@@ -787,8 +903,12 @@ function updateAfterLoad() {
   // Update case info
   const dx = ecgData.targets?.dx || 'Unknown';
   const age = ecgData.targets?.age_years;
-  document.getElementById('caseInfo').textContent = age != null
-    ? `${dx}, ${age.toFixed(1)} years`
+  const sex = ecgData.targets?.sex;
+  const sexLabel = sex === 'male' ? 'M' : sex === 'female' ? 'F' : '';
+  const ageStr = age != null ? `${age.toFixed(0)}y` : '';
+  const demo = [ageStr, sexLabel].filter(Boolean).join(' ');
+  document.getElementById('caseInfo').textContent = demo
+    ? `${dx}, ${demo}`
     : dx;
 
   // Draw
@@ -850,9 +970,11 @@ function computeMeasurements() {
   }
 
   document.getElementById('m_dx').textContent = ecgData.targets?.dx || '—';
-  document.getElementById('m_age').textContent = ecgData.targets?.age_years != null
-    ? `${ecgData.targets.age_years.toFixed(1)} years`
-    : '—';
+  const ageVal = ecgData.targets?.age_years;
+  const sexVal = ecgData.targets?.sex;
+  const sexStr = sexVal === 'male' ? 'M' : sexVal === 'female' ? 'F' : '';
+  const ageDisplay = ageVal != null ? `${ageVal.toFixed(0)}y` : '';
+  document.getElementById('m_age').textContent = [ageDisplay, sexStr].filter(Boolean).join(' ') || '—';
 }
 
 function fmtMeasure(value, unit, param, age) {
@@ -924,13 +1046,15 @@ function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, sho
 
     // Lead label
     ctx.fillStyle = '#333';
-    ctx.font = 'bold 12px system-ui';
+    ctx.font = 'bold 11px "Courier New", Consolas, monospace';
     ctx.textAlign = 'left';
     ctx.fillText(lead, 8, y0 - rowH/2 + 14);
 
-    // Draw trace
-    ctx.strokeStyle = '#111';
-    ctx.lineWidth = 1;
+    // Draw trace (slightly thicker for thermal printer look)
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth = 1.3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
 
     const pxPerSample = (pxPerMm * mmPerSec) / fs;
@@ -977,7 +1101,7 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
 
       // Label
       ctx.fillStyle = '#333';
-      ctx.font = 'bold 11px system-ui';
+      ctx.font = 'bold 10px "Courier New", Consolas, monospace';
       ctx.fillText(lead, x0, ri * rowH + 14);
 
       // Trace (2.5 seconds per column)
@@ -989,8 +1113,10 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
       const pxPerSample = (colW - 20) / samplesPerCol;
       const uvPerPx = 1000 / (pxPerMm * mmPerMV);
 
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 1.3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       ctx.beginPath();
 
       for (let j = startSample; j < endSample; j++) {
@@ -1006,7 +1132,7 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
   // Rhythm strip (Lead II, full duration)
   const rhythmY = h - rhythmH / 2 - 10;
   ctx.fillStyle = '#333';
-  ctx.font = 'bold 11px system-ui';
+  ctx.font = 'bold 10px "Courier New", Consolas, monospace';
   ctx.fillText('II (rhythm)', 10, h - rhythmH);
 
   if (leads.II) {
@@ -1014,8 +1140,10 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
     const pxPerSample = (w - 40) / signal.length;
     const uvPerPx = 1000 / (pxPerMm * mmPerMV);
 
-    ctx.strokeStyle = '#111';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth = 1.3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
 
     for (let j = 0; j < signal.length; j++) {
@@ -1032,37 +1160,56 @@ function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, show
 }
 
 function drawGrid(ctx, w, h, pxPerMm) {
-  // 1mm grid
-  ctx.strokeStyle = 'rgba(205,40,40,0.18)';
-  ctx.lineWidth = 0.5;
+  // Add subtle paper texture (thermal paper effect)
+  addPaperTexture(ctx, w, h);
+
+  // 1mm grid - subtle
+  ctx.strokeStyle = 'rgba(185,55,55,0.20)';
+  ctx.lineWidth = 0.6;
   for (let x = 0; x < w; x += pxPerMm) {
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, h);
     ctx.stroke();
   }
   for (let y = 0; y < h; y += pxPerMm) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(w, y + 0.5);
     ctx.stroke();
   }
 
-  // 5mm grid
-  ctx.strokeStyle = 'rgba(205,40,40,0.44)';
-  ctx.lineWidth = 1;
+  // 5mm grid - more prominent
+  ctx.strokeStyle = 'rgba(175,45,45,0.50)';
+  ctx.lineWidth = 1.2;
   for (let x = 0; x < w; x += pxPerMm * 5) {
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, h);
     ctx.stroke();
   }
   for (let y = 0; y < h; y += pxPerMm * 5) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(w, y + 0.5);
     ctx.stroke();
   }
+}
+
+// Add subtle paper texture to simulate thermal/ECG paper
+function addPaperTexture(ctx, w, h) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+
+  // Very subtle noise - mimics paper grain
+  for (let i = 0; i < data.length; i += 4) {
+    const noise = (Math.random() - 0.5) * 6; // Very subtle
+    data[i] = Math.max(0, Math.min(255, data[i] + noise));     // R
+    data[i+1] = Math.max(0, Math.min(255, data[i+1] + noise)); // G
+    data[i+2] = Math.max(0, Math.min(255, data[i+2] + noise)); // B
+  }
+
+  ctx.putImageData(imageData, 0, 0);
 }
 
 function drawFiducials(ctx, signal, fs, meas, y0, pxPerSample) {
@@ -1576,16 +1723,23 @@ window.exportPNG = function() {
 };
 
 window.exportJSON = function() {
-  if (!ecgData) return alert('No ECG loaded');
+  if (!ecgData) {
+    showStatus('Generate or load an ECG first', 'error');
+    return;
+  }
   const blob = new Blob([JSON.stringify(ecgData, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.download = 'ecg-export.json';
   link.href = URL.createObjectURL(blob);
   link.click();
+  showStatus('JSON exported', 'success', 2000);
 };
 
 window.exportCSV = function() {
-  if (!ecgData) return alert('No ECG loaded');
+  if (!ecgData) {
+    showStatus('Generate or load an ECG first', 'error');
+    return;
+  }
 
   const leads = ecgData.leads_uV;
   const leadNames = Object.keys(leads);
@@ -1601,6 +1755,7 @@ window.exportCSV = function() {
   link.download = 'ecg-export.csv';
   link.href = URL.createObjectURL(blob);
   link.click();
+  showStatus('CSV exported', 'success', 2000);
 };
 
 // ============================================================================
