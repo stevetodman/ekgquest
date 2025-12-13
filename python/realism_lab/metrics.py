@@ -426,6 +426,118 @@ def compute_noise_metrics(ecg: ECGData) -> NoiseMetrics:
 
 
 # =============================================================================
+# SPECTRAL SIMILARITY METRICS
+# =============================================================================
+
+@dataclass
+class SpectralMetrics:
+    """Spectral analysis metrics for realism validation.
+
+    Real ECGs have characteristic frequency distributions:
+    - QRS complex energy: 3-40 Hz
+    - P/T wave energy: 0.5-10 Hz
+    - HF rolloff above ~40 Hz
+    - Spectral entropy indicates complexity
+    """
+    # Band power distribution
+    vlf_power_pct: float = 0.0   # 0.003-0.04 Hz (very low freq)
+    lf_power_pct: float = 0.0    # 0.04-0.15 Hz (low freq - sympathetic)
+    hf_power_pct: float = 0.0    # 0.15-0.4 Hz (high freq - parasympathetic)
+    qrs_band_power_pct: float = 0.0  # 5-40 Hz (QRS content)
+    hf_rolloff_slope: float = 0.0  # Slope of power above 40 Hz
+
+    # Spectral shape metrics
+    spectral_entropy: float = 0.0  # Normalized entropy (0-1)
+    spectral_centroid_hz: float = 0.0  # Center of mass of spectrum
+    spectral_bandwidth_hz: float = 0.0  # Spread of spectrum
+
+    # Realism flags
+    has_realistic_qrs_peak: bool = True  # Peak in 5-40 Hz range
+    has_realistic_rolloff: bool = True   # HF content decreases appropriately
+    is_too_smooth: bool = False  # Synthetic signals often too smooth (low HF)
+    is_too_noisy: bool = False   # Or have wrong noise characteristics
+
+
+def compute_spectral_metrics(ecg: ECGData) -> SpectralMetrics:
+    """
+    Compute spectral metrics for realism validation.
+
+    Compares frequency content against expected patterns for real ECGs.
+    """
+    metrics = SpectralMetrics()
+
+    # Use lead II (most commonly analyzed)
+    if 'II' not in ecg.leads_uV:
+        return metrics
+
+    data = ecg.leads_uV['II'].astype(np.float64)
+    fs = ecg.fs
+    n = len(data)
+
+    # Compute power spectral density using Welch's method
+    nperseg = min(n, 4 * fs)  # 4-second windows
+    freqs, psd = signal.welch(data, fs=fs, nperseg=nperseg, noverlap=nperseg // 2)
+
+    if len(psd) == 0:
+        return metrics
+
+    # Total power for normalization
+    total_power = np.sum(psd)
+    if total_power == 0:
+        return metrics
+
+    # Band power distribution (as percentage of total)
+    def band_power(f_low, f_high):
+        mask = (freqs >= f_low) & (freqs < f_high)
+        return np.sum(psd[mask]) / total_power * 100
+
+    metrics.vlf_power_pct = band_power(0.003, 0.04)
+    metrics.lf_power_pct = band_power(0.04, 0.15)
+    metrics.hf_power_pct = band_power(0.15, 0.4)
+    metrics.qrs_band_power_pct = band_power(5, 40)
+
+    # High-frequency rolloff slope (log-log regression above 40 Hz)
+    hf_mask = (freqs >= 40) & (freqs <= min(fs / 2.5, 150))
+    if np.sum(hf_mask) >= 5:
+        hf_freqs = np.log10(freqs[hf_mask])
+        hf_psd = np.log10(psd[hf_mask] + 1e-20)
+        if len(hf_freqs) > 1:
+            slope, _ = np.polyfit(hf_freqs, hf_psd, 1)
+            metrics.hf_rolloff_slope = float(slope)
+
+    # Spectral entropy (normalized Shannon entropy)
+    psd_norm = psd / total_power
+    psd_norm = psd_norm[psd_norm > 0]  # Remove zeros for log
+    if len(psd_norm) > 0:
+        entropy = -np.sum(psd_norm * np.log2(psd_norm))
+        max_entropy = np.log2(len(psd_norm))
+        metrics.spectral_entropy = float(entropy / max_entropy) if max_entropy > 0 else 0
+
+    # Spectral centroid and bandwidth
+    metrics.spectral_centroid_hz = float(np.sum(freqs * psd) / total_power)
+    metrics.spectral_bandwidth_hz = float(np.sqrt(np.sum(((freqs - metrics.spectral_centroid_hz) ** 2) * psd) / total_power))
+
+    # Realism checks
+
+    # 1. QRS band should have significant power (typically 30-70% of ECG energy)
+    metrics.has_realistic_qrs_peak = bool(15 < metrics.qrs_band_power_pct < 85)
+
+    # 2. HF rolloff should be negative (power decreases with frequency)
+    # Real ECGs typically have slope between -2 and -6 in log-log space
+    metrics.has_realistic_rolloff = bool(-8 < metrics.hf_rolloff_slope < -1)
+
+    # 3. Check for "too smooth" signal (insufficient HF content)
+    # Real ECGs have some natural HF variation
+    hf_content = band_power(50, min(fs / 2.5, 150))
+    metrics.is_too_smooth = bool(hf_content < 0.5 and metrics.spectral_entropy < 0.5)
+
+    # 4. Check for "too noisy" signal (excessive HF content)
+    metrics.is_too_noisy = bool(hf_content > 20 or metrics.spectral_entropy > 0.95)
+
+    return metrics
+
+
+# =============================================================================
 # AGGREGATE METRICS
 # =============================================================================
 
@@ -437,6 +549,7 @@ class ECGMetrics:
     morphology: MorphologyMetrics = field(default_factory=MorphologyMetrics)
     hrv: HRVMetrics = field(default_factory=HRVMetrics)
     noise: NoiseMetrics = field(default_factory=NoiseMetrics)
+    spectral: SpectralMetrics = field(default_factory=SpectralMetrics)
 
 
 def compute_all_metrics(ecg: ECGData) -> ECGMetrics:
@@ -447,4 +560,5 @@ def compute_all_metrics(ecg: ECGData) -> ECGMetrics:
         morphology=compute_morphology_metrics(ecg),
         hrv=compute_hrv_metrics(ecg),
         noise=compute_noise_metrics(ecg),
+        spectral=compute_spectral_metrics(ecg),
     )

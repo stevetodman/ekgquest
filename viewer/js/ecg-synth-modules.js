@@ -883,6 +883,96 @@ export function computeHRVMetrics(rrIntervals) {
 }
 
 // ============================================================================
+// BEAT-TO-BEAT MORPHOLOGY JITTER
+// Generates realistic per-beat variations in amplitude, timing, duration, and shape
+// Real ECGs have subtle beat-to-beat variations due to:
+// - Respiratory modulation (amplitude changes with breathing)
+// - Autonomic tone fluctuations
+// - Slight electrode contact variations
+// - Beat-to-beat hemodynamic changes
+// ============================================================================
+
+/**
+ * Generate per-beat jitter parameters for realistic morphology variation
+ * @param {number} beatIndex - Index of the beat in the trace
+ * @param {number} totalBeats - Total number of beats
+ * @param {function} rng - Random number generator
+ * @param {number} respiratoryRate - Respiratory rate in breaths/min (default 15)
+ * @param {number} fs - Sampling rate (for time calculations)
+ * @returns {Object} Jitter parameters for this beat
+ */
+export function generateBeatJitter(beatIndex, totalBeats, rng, respiratoryRate = 15, beatTime = 0) {
+  // Respiratory modulation - sinusoidal amplitude variation with breathing
+  // Inspiration increases R-wave amplitude, expiration decreases it
+  const respPeriod = 60 / respiratoryRate;  // seconds per breath
+  const respPhase = (beatTime % respPeriod) / respPeriod * 2 * Math.PI;
+  const respModulation = 0.06 * Math.sin(respPhase);  // ±6% with respiration
+
+  // Random amplitude jitter (±5% baseline + respiratory)
+  const ampJitter = 1.0 + respModulation + randn(rng) * 0.05;
+
+  // Timing jitter (±8ms for QRS onset, ±5ms for other features)
+  const timeJitterQRS = randn(rng) * 0.008;
+  const timeJitterP = randn(rng) * 0.005;
+  const timeJitterT = randn(rng) * 0.006;
+
+  // Duration jitter (±3% for QRS width, ±5% for P and T)
+  const qrsDurationFactor = 1.0 + randn(rng) * 0.03;
+  const pDurationFactor = 1.0 + randn(rng) * 0.05;
+  const tDurationFactor = 1.0 + randn(rng) * 0.05;
+
+  // Shape jitter - subtle variations in direction vectors
+  // These create slight axis shifts beat-to-beat
+  const dirJitter = [
+    randn(rng) * 0.03,  // X component
+    randn(rng) * 0.03,  // Y component
+    randn(rng) * 0.02,  // Z component (less variation)
+  ];
+
+  // P wave amplitude variation (atrial conduction variability)
+  const pAmpFactor = 1.0 + randn(rng) * 0.08;
+
+  // T wave amplitude variation (repolarization variability)
+  const tAmpFactor = 1.0 + randn(rng) * 0.07;
+
+  // Occasional subtle notching probability (adds micro-notches)
+  const hasSubtleNotch = rng() < 0.15;  // 15% of beats
+  const notchDepth = hasSubtleNotch ? 0.03 + rng() * 0.04 : 0;
+  const notchPosition = 0.4 + rng() * 0.2;  // Position within QRS
+
+  return {
+    ampJitter,
+    timeJitterQRS,
+    timeJitterP,
+    timeJitterT,
+    qrsDurationFactor,
+    pDurationFactor,
+    tDurationFactor,
+    dirJitter,
+    pAmpFactor,
+    tAmpFactor,
+    hasSubtleNotch,
+    notchDepth,
+    notchPosition,
+    respPhase,
+  };
+}
+
+/**
+ * Apply direction jitter to a direction vector
+ * @param {Array} dir - Original direction vector [x, y, z]
+ * @param {Array} jitter - Jitter values [dx, dy, dz]
+ * @returns {Array} Jittered and normalized direction vector
+ */
+function applyDirJitter(dir, jitter) {
+  return norm([
+    dir[0] + jitter[0],
+    dir[1] + jitter[1],
+    dir[2] + jitter[2],
+  ]);
+}
+
+// ============================================================================
 // MODULE 2: MORPHOLOGY MODEL
 // Generates VCG (3D source vectors) from beat schedule
 // Input: beatSchedule, params, seed
@@ -946,6 +1036,62 @@ function addTWave(Vx, Vy, Vz, fs, qrsOn, QT, aScale, tJit, dT1, dT2, Taxis, isPV
   addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.16, 0.04, 0.015 * aScale, axisDir(Taxis, -0.1));
 }
 
+// Jittered versions of wave generation functions
+
+function addPWaveJittered(Vx, Vy, Vz, fs, pCenter, aScale, durFactor, dP1, dP2) {
+  // Duration jitter affects wave width
+  const sig1 = 0.014 * durFactor;
+  const sig2 = 0.016 * durFactor;
+  addGaussian3(Vx, Vy, Vz, fs, pCenter - 0.01, sig1, 0.075 * aScale, dP1);
+  addGaussian3(Vx, Vy, Vz, fs, pCenter + 0.012, sig2, 0.095 * aScale, dP2);
+}
+
+function addQRSJittered(Vx, Vy, Vz, fs, qrsOn, qrsC, params, jitter, dQ1, dQ2, dQ3, dx, isPVC, rng) {
+  const qrsWidth = params.QRS * jitter.qrsDurationFactor;
+  const qrsAmp = isPVC ? 1.4 : 1.0;
+  const aScale = jitter.ampJitter;
+
+  if (dx === "LBBB") {
+    const dLBBB1 = applyDirJitter(norm([0.85, 0.3, 0.4]), jitter.dirJitter);
+    const dLBBB2 = applyDirJitter(norm([0.7, 0.6, -0.2]), jitter.dirJitter);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.35 * qrsWidth, 0.12 * qrsWidth, 0.6 * aScale, dLBBB1);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.18 * qrsWidth, 0.9 * aScale, dLBBB2);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.35 * qrsWidth, 0.14 * qrsWidth, 0.5 * aScale, dLBBB1);
+    return;
+  }
+
+  if (isPVC) {
+    const dPVC = applyDirJitter(norm([0.3 + rng() * 0.4, 0.8, -0.5 + rng() * 0.3]), jitter.dirJitter);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.3 * qrsWidth, 0.12 * qrsWidth, 0.4 * aScale * qrsAmp, dQ1);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.2 * qrsWidth, 1.2 * aScale * qrsAmp, dPVC);
+    addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.35 * qrsWidth, 0.15 * qrsWidth, 0.5 * aScale * qrsAmp, dQ3);
+    return;
+  }
+
+  // Normal QRS with optional subtle notching
+  addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.32 * qrsWidth, 0.09 * qrsWidth, 0.22 * aScale * qrsAmp, dQ1);
+  addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.16 * qrsWidth, 1.1 * aScale * qrsAmp, dQ2);
+  addGaussian3(Vx, Vy, Vz, fs, qrsC + 0.34 * qrsWidth, 0.12 * qrsWidth, 0.36 * aScale * qrsAmp, dQ3);
+
+  // Add subtle notching (15% of beats have micro-variations)
+  if (jitter.hasSubtleNotch && jitter.notchDepth > 0) {
+    const notchTime = qrsC + (jitter.notchPosition - 0.5) * 0.4 * qrsWidth;
+    const notchDir = norm([-dQ2[0] * 0.3, -dQ2[1] * 0.2, dQ2[2] * 0.5]);
+    addGaussian3(Vx, Vy, Vz, fs, notchTime, 0.004, jitter.notchDepth * aScale, notchDir);
+  }
+}
+
+function addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT, aScale, tJit, dT1, dT2, Taxis, isPVC) {
+  const tPeak = qrsOn + 0.62 * QT + tJit;
+  const tAmp = isPVC ? 0.7 : 1.0;
+  const tDir1 = isPVC ? norm([-dT1[0], -dT1[1], -dT1[2]]) : dT1;
+  const tDir2 = isPVC ? norm([-dT2[0], -dT2[1], -dT2[2]]) : dT2;
+
+  addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.0, 0.1 * QT, 0.22 * aScale * tAmp, tDir1);
+  addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.03, 0.14 * QT, 0.18 * aScale * tAmp, tDir2);
+  addGaussian3(Vx, Vy, Vz, fs, tPeak + 0.16, 0.04, 0.015 * aScale, axisDir(Taxis, -0.1));
+}
+
 export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
   const rng = mulberry32(Math.max(1, Math.floor(seed + 1000)));
   const RR = 60 / params.HR;
@@ -978,47 +1124,68 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
     }
   }
 
-  // Generate waveforms for each beat
-  for (const beat of beatSchedule.beats) {
-    const aScale = 1.0 + randn(rng) * 0.02;
-    const tJit = randn(rng) * 0.003;
+  // Respiratory rate varies with age (higher in infants)
+  const ageY = params.ageY || 8;
+  const respRate = ageY < 1 ? 40 : ageY < 5 ? 25 : ageY < 12 ? 20 : 15;
+  const totalBeats = beatSchedule.beats.length;
 
-    // P wave
+  // Generate waveforms for each beat with enhanced jitter
+  for (let beatIdx = 0; beatIdx < totalBeats; beatIdx++) {
+    const beat = beatSchedule.beats[beatIdx];
+    const beatTime = beat.qrsTime || beat.pTime || 0;
+
+    // Generate comprehensive per-beat jitter
+    const jitter = generateBeatJitter(beatIdx, totalBeats, rng, respRate, beatTime);
+
+    // Apply jittered direction vectors for this beat
+    const dP1j = applyDirJitter(dP1, jitter.dirJitter);
+    const dP2j = applyDirJitter(dP2, jitter.dirJitter);
+    const dQ1j = applyDirJitter(dQ1, jitter.dirJitter);
+    const dQ2j = applyDirJitter(dQ2, jitter.dirJitter);
+    const dQ3j = applyDirJitter(dQ3, jitter.dirJitter);
+    const dT1j = applyDirJitter(dT1, jitter.dirJitter);
+    const dT2j = applyDirJitter(dT2, jitter.dirJitter);
+
+    // P wave with enhanced jitter
     if (beat.hasPWave && beat.pTime != null) {
-      const pCenter = beat.pTime + 0.04 + tJit;
-      addPWave(Vx, Vy, Vz, fs, pCenter, aScale, dP1, dP2);
+      const pCenter = beat.pTime + 0.04 + jitter.timeJitterP;
+      const pAmp = jitter.ampJitter * jitter.pAmpFactor;
+      addPWaveJittered(Vx, Vy, Vz, fs, pCenter, pAmp, jitter.pDurationFactor, dP1j, dP2j);
     }
 
-    // QRS complex
+    // QRS complex with enhanced jitter
     if (beat.hasQRS && beat.qrsTime != null) {
-      const qrsOn = beat.qrsTime;
-      const qrsC = qrsOn + params.QRS / 2;
+      const qrsOn = beat.qrsTime + jitter.timeJitterQRS;
+      const qrsWidth = params.QRS * jitter.qrsDurationFactor;
+      const qrsC = qrsOn + qrsWidth / 2;
 
-      addQRS(Vx, Vy, Vz, fs, qrsOn, qrsC, params, aScale, tJit, dQ1, dQ2, dQ3, dx, beat.isPVC, rng);
+      addQRSJittered(Vx, Vy, Vz, fs, qrsOn, qrsC, params, jitter, dQ1j, dQ2j, dQ3j, dx, beat.isPVC, rng);
 
-      // Morphology modifiers
+      // Morphology modifiers with jitter
       if (!beat.isPVC) {
         if (dx === "WPW") {
-          const dDelta = norm([dQ1[0] * 0.6 + dQ2[0] * 0.4, dQ1[1] * 0.6 + dQ2[1] * 0.4, dQ1[2] * 0.6 + dQ2[2] * 0.4]);
-          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + tJit, 0.022, 0.28 * aScale, dDelta);
+          const dDelta = norm([dQ1j[0] * 0.6 + dQ2j[0] * 0.4, dQ1j[1] * 0.6 + dQ2j[1] * 0.4, dQ1j[2] * 0.6 + dQ2j[2] * 0.4]);
+          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.012 + jitter.timeJitterQRS, 0.022, 0.28 * jitter.ampJitter, dDelta);
         }
         if (dx === "RBBB") {
-          const dLate = norm([-0.9, 0.0, 0.95]);
-          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * params.QRS + tJit, 0.01 + 0.08 * params.QRS, 0.35 * aScale, dLate);
+          const dLate = applyDirJitter(norm([-0.9, 0.0, 0.95]), jitter.dirJitter);
+          addGaussian3(Vx, Vy, Vz, fs, qrsOn + 0.82 * qrsWidth, 0.01 + 0.08 * qrsWidth, 0.35 * jitter.ampJitter, dLate);
         }
         if (dx === "LVH") {
-          addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.16 * params.QRS, 0.55 * aScale, axisDir(params.QRSaxis - 20, params.zQ2 * 0.8));
+          addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.16 * qrsWidth, 0.55 * jitter.ampJitter, axisDir(params.QRSaxis - 20, params.zQ2 * 0.8));
         }
         if (dx === "RVH") {
-          addGaussian3(Vx, Vy, Vz, fs, qrsC + tJit, 0.14 * params.QRS, 0.45 * aScale, norm([-0.75, 0.2, 0.95]));
+          addGaussian3(Vx, Vy, Vz, fs, qrsC, 0.14 * qrsWidth, 0.45 * jitter.ampJitter, applyDirJitter(norm([-0.75, 0.2, 0.95]), jitter.dirJitter));
         }
         if (dx === "LAFB") {
-          addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * params.QRS + tJit, 0.08 * params.QRS, 0.15 * aScale, norm([0.9, -0.3, 0.1]));
+          addGaussian3(Vx, Vy, Vz, fs, qrsC - 0.25 * qrsWidth, 0.08 * qrsWidth, 0.15 * jitter.ampJitter, applyDirJitter(norm([0.9, -0.3, 0.1]), jitter.dirJitter));
         }
       }
 
-      // T wave
-      addTWave(Vx, Vy, Vz, fs, qrsOn, QT, aScale, tJit, dT1, dT2, params.Taxis, beat.isPVC);
+      // T wave with enhanced jitter
+      const tAmp = jitter.ampJitter * jitter.tAmpFactor;
+      const tDur = jitter.tDurationFactor;
+      addTWaveJittered(Vx, Vy, Vz, fs, qrsOn, QT * tDur, tAmp, jitter.timeJitterT, dT1j, dT2j, params.Taxis, beat.isPVC);
 
       // Pericarditis ST changes
       if (dx === "Pericarditis" && !beat.isPVC && beat.pTime != null) {
@@ -1032,8 +1199,8 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed) {
         const stEnd = qrsOn + 0.18;
         const prStart = beat.pTime + 0.1;
         const prEnd = qrsOn - 0.01;
-        const aST = 0.1 * aScale;
-        const aPR = -0.04 * aScale;
+        const aST = 0.1 * jitter.ampJitter;
+        const aPR = -0.04 * jitter.ampJitter;
         const i0 = Math.max(0, Math.floor((beat.pTime + 0.05) * fs));
         const i1 = Math.min(N - 1, Math.ceil((stEnd + 0.25) * fs));
         for (let i = i0; i <= i1; i++) {

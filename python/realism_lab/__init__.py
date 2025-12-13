@@ -25,9 +25,24 @@ from .metrics import (
     compute_distribution_metrics,
     compute_morphology_metrics,
     compute_hrv_metrics,
+    compute_spectral_metrics,
+    SpectralMetrics,
 )
 from .eval_realism import run_evaluation, EvaluationResult
 from .report import generate_report
+from .pediatric_reference import (
+    RIJNBEEK_REFERENCE,
+    validate_ecg_against_rijnbeek,
+    RijnbeekValidationResult,
+    get_reference_value,
+    compute_z_score_rijnbeek,
+)
+from .ptbxl_reference import (
+    PTBXL_REFERENCE,
+    compare_to_ptbxl,
+    compute_ptbxl_realism_score,
+    get_ptbxl_class,
+)
 
 __all__ = [
     "load_ecg_json",
@@ -37,7 +52,20 @@ __all__ = [
     "compute_distribution_metrics",
     "compute_morphology_metrics",
     "compute_hrv_metrics",
+    "compute_spectral_metrics",
+    "SpectralMetrics",
     "run_evaluation",
     "EvaluationResult",
     "generate_report",
+    # Pediatric reference (Rijnbeek 2001)
+    "RIJNBEEK_REFERENCE",
+    "validate_ecg_against_rijnbeek",
+    "RijnbeekValidationResult",
+    "get_reference_value",
+    "compute_z_score_rijnbeek",
+    # Adult reference (PTB-XL)
+    "PTBXL_REFERENCE",
+    "compare_to_ptbxl",
+    "compute_ptbxl_realism_score",
+    "get_ptbxl_class",
 ]

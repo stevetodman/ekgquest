@@ -50,6 +50,8 @@ import {
   samplePediatricPriors,
   computeZScore,
   checkNormalLimits,
+  // Beat-to-beat jitter
+  generateBeatJitter,
 } from "../viewer/js/ecg-synth-modules.js";
 import { ageDefaults, applyDx, DIAGNOSES } from "../viewer/js/ecg-synth.js";
 import { normalizeECGData, detectRPeaks, physicsChecks } from "../viewer/js/ecg-core.js";
@@ -460,6 +462,71 @@ async function run() {
     assert.ok(!tachyCheck.normal, "HR 170 at age 8 should be abnormal");
     assert.ok(tachyCheck.zScore > 2, "HR 170 at age 8 should have z>2");
     console.log(`  Abnormal detection: HR=170 at age 8 -> ${tachyCheck.interpretation}`);
+  }
+
+  // Test Beat-to-Beat Jitter
+  console.log("\nTest 1g: Beat-to-Beat Morphology Jitter");
+  {
+    // Test generateBeatJitter function
+    const rng = mulberry32(12345);
+    const jitter1 = generateBeatJitter(0, 10, rng, 15, 0.5);
+    const jitter2 = generateBeatJitter(1, 10, rng, 15, 1.5);
+
+    // Check all jitter properties exist
+    assert.ok('ampJitter' in jitter1, "Should have ampJitter");
+    assert.ok('timeJitterQRS' in jitter1, "Should have timeJitterQRS");
+    assert.ok('qrsDurationFactor' in jitter1, "Should have qrsDurationFactor");
+    assert.ok('dirJitter' in jitter1, "Should have dirJitter");
+    assert.ok('pAmpFactor' in jitter1, "Should have pAmpFactor");
+    assert.ok('tAmpFactor' in jitter1, "Should have tAmpFactor");
+    console.log("  generateBeatJitter() structure: OK");
+
+    // Check amplitude jitter is within reasonable range (±15%)
+    assert.ok(jitter1.ampJitter > 0.85 && jitter1.ampJitter < 1.15, "ampJitter should be within ±15%");
+    assert.ok(jitter1.qrsDurationFactor > 0.9 && jitter1.qrsDurationFactor < 1.1, "qrsDurationFactor should be within ±10%");
+    console.log(`  Jitter ranges: ampJitter=${jitter1.ampJitter.toFixed(3)}, durFactor=${jitter1.qrsDurationFactor.toFixed(3)}`);
+
+    // Verify different beats get different jitter
+    assert.ok(jitter1.ampJitter !== jitter2.ampJitter, "Different beats should get different jitter");
+    console.log("  Beat-to-beat variation: OK");
+
+    // Test respiratory modulation produces cyclic pattern
+    const respRng = mulberry32(42);
+    const jitters = [];
+    for (let i = 0; i < 20; i++) {
+      jitters.push(generateBeatJitter(i, 20, respRng, 15, i * 0.75));
+    }
+    // Check variance in amplitude jitter (should be > 0 due to respiratory modulation)
+    const ampMean = jitters.reduce((s, j) => s + j.ampJitter, 0) / jitters.length;
+    const ampVar = jitters.reduce((s, j) => s + Math.pow(j.ampJitter - ampMean, 2), 0) / jitters.length;
+    assert.ok(ampVar > 0.001, "Should have measurable amplitude variance");
+    console.log(`  Respiratory modulation: variance=${ampVar.toFixed(4)}`);
+
+    // Test that ECG output has beat-to-beat variation
+    const params = applyDx(ageDefaults(8), "Normal sinus");
+    const ecg1 = synthECGModular(8, "Normal sinus", 42);
+    // Get R-wave peaks from lead II
+    const leadII = ecg1.leads_uV.II;
+    const peaks = [];
+    for (let i = 100; i < leadII.length - 100; i++) {
+      if (leadII[i] > 500 && leadII[i] > leadII[i-1] && leadII[i] > leadII[i+1]) {
+        // Check if local max
+        let isMax = true;
+        for (let j = -10; j <= 10; j++) {
+          if (leadII[i + j] > leadII[i]) isMax = false;
+        }
+        if (isMax) peaks.push(leadII[i]);
+      }
+    }
+    // Check that R-wave peaks have some variation
+    if (peaks.length >= 3) {
+      const peakMean = peaks.reduce((a, b) => a + b, 0) / peaks.length;
+      const peakStd = Math.sqrt(peaks.reduce((s, p) => s + Math.pow(p - peakMean, 2), 0) / peaks.length);
+      const cv = peakStd / peakMean;
+      assert.ok(cv > 0.01, "R-wave peaks should have measurable variation (CV > 1%)");
+      console.log(`  R-wave amplitude CV: ${(cv * 100).toFixed(2)}%`);
+    }
+    console.log("  Beat-to-beat ECG variation: OK");
   }
 
   // Test Module 1: Rhythm Model

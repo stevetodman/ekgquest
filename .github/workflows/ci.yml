@@ -66,6 +66,33 @@ jobs:
           name: realism-report
           path: python/outputs/realism_report.json
 
+  visual-regression:
+    name: Visual Regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run visual regression tests
+        run: npm run test:visual
+
+      - name: Upload visual diff artifacts
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-diff
+          path: |
+            test/visual/output/
+            test/visual/diff/
+
   lint-html:
     name: Static Checks
     runs-on: ubuntu-latest

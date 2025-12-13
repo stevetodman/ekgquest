@@ -23,6 +23,18 @@ from realism_lab.metrics import (
     get_age_bin,
     PEDIATRIC_PRIORS,
 )
+from realism_lab.pediatric_reference import (
+    RIJNBEEK_REFERENCE,
+    validate_ecg_against_rijnbeek,
+    get_reference_value,
+    compute_z_score_rijnbeek,
+    get_rijnbeek_bin,
+)
+from realism_lab.ptbxl_reference import (
+    PTBXL_REFERENCE,
+    compare_to_ptbxl,
+    get_ptbxl_class,
+)
 
 
 # =============================================================================
@@ -275,6 +287,42 @@ class TestHRVMetrics:
             assert 30 < metrics.hr_bpm < 250  # Physiological range
 
 
+class TestSpectralMetrics:
+    """Tests for spectral metrics."""
+
+    def test_spectral_metrics_structure(self, sample_ecg_data):
+        """Test spectral metrics computation."""
+        from realism_lab.metrics import compute_spectral_metrics
+        metrics = compute_spectral_metrics(sample_ecg_data)
+        assert hasattr(metrics, 'qrs_band_power_pct')
+        assert hasattr(metrics, 'spectral_entropy')
+        assert hasattr(metrics, 'spectral_centroid_hz')
+        assert hasattr(metrics, 'hf_rolloff_slope')
+
+    def test_band_powers_sum_reasonable(self, sample_ecg_data):
+        """Test band powers are reasonable percentages."""
+        from realism_lab.metrics import compute_spectral_metrics
+        metrics = compute_spectral_metrics(sample_ecg_data)
+        # QRS band should have significant power
+        assert metrics.qrs_band_power_pct >= 0
+        assert metrics.qrs_band_power_pct <= 100
+
+    def test_spectral_entropy_normalized(self, sample_ecg_data):
+        """Test spectral entropy is normalized 0-1."""
+        from realism_lab.metrics import compute_spectral_metrics
+        metrics = compute_spectral_metrics(sample_ecg_data)
+        assert 0 <= metrics.spectral_entropy <= 1
+
+    def test_realism_flags(self, sample_ecg_data):
+        """Test realism flags are computed."""
+        from realism_lab.metrics import compute_spectral_metrics
+        metrics = compute_spectral_metrics(sample_ecg_data)
+        assert isinstance(metrics.has_realistic_qrs_peak, bool)
+        assert isinstance(metrics.has_realistic_rolloff, bool)
+        assert isinstance(metrics.is_too_smooth, bool)
+        assert isinstance(metrics.is_too_noisy, bool)
+
+
 # =============================================================================
 # INTEGRATION TESTS
 # =============================================================================
@@ -295,6 +343,106 @@ class TestIntegration:
             ecg = load_ecg_json(json_files[0])
             assert ecg.fs > 0
             assert len(ecg.leads_uV) > 0
+
+
+# =============================================================================
+# EXTERNAL REFERENCE TESTS
+# =============================================================================
+
+class TestRijnbeekReference:
+    """Tests for pediatric Rijnbeek reference values."""
+
+    def test_rijnbeek_structure(self):
+        """Test RIJNBEEK_REFERENCE structure."""
+        assert "source" in RIJNBEEK_REFERENCE
+        assert "age_bins" in RIJNBEEK_REFERENCE
+        assert len(RIJNBEEK_REFERENCE["age_bins"]) == 9
+
+    def test_get_rijnbeek_bin(self):
+        """Test age bin lookup."""
+        neonate = get_rijnbeek_bin(0.05)
+        assert neonate["id"] == "0-1m"
+
+        toddler = get_rijnbeek_bin(2.0)
+        assert toddler["id"] == "1-3y"
+
+        adolescent = get_rijnbeek_bin(14.0)
+        assert adolescent["id"] == "12-16y"
+
+    def test_get_reference_value(self):
+        """Test getting reference values."""
+        # 8-year-old heart rate
+        ref = get_reference_value(8.0, "heart_rate", "boys")
+        assert "p50" in ref
+        assert "p2" in ref
+        assert "p98" in ref
+        assert ref["p50"] == 78  # From Rijnbeek 2001
+
+    def test_compute_z_score_rijnbeek(self):
+        """Test z-score computation against Rijnbeek."""
+        # 8-year-old with HR 78 (median) should have z ~ 0
+        z = compute_z_score_rijnbeek(78, 8.0, "heart_rate", "boys")
+        assert z is not None
+        assert abs(z) < 0.5
+
+        # 8-year-old with HR 55 (2nd percentile) should have z ~ -2
+        z_low = compute_z_score_rijnbeek(55, 8.0, "heart_rate", "boys")
+        assert z_low is not None
+        assert z_low < -1.5
+
+    def test_validate_ecg_against_rijnbeek(self):
+        """Test full ECG validation against Rijnbeek."""
+        # Normal 8-year-old values
+        result = validate_ecg_against_rijnbeek(
+            age_years=8.0,
+            hr_bpm=78,
+            pr_ms=134,
+            qrs_ms=85,
+            qtc_ms=411,
+            axis_deg=70,
+            sex="boys"
+        )
+        assert result.parameters_checked == 5
+        assert result.pass_rate >= 80  # All should be normal
+
+    def test_validate_ecg_abnormal(self):
+        """Test validation with abnormal values."""
+        # Neonate with adult-like values
+        result = validate_ecg_against_rijnbeek(
+            age_years=0.05,
+            hr_bpm=60,   # Too slow for neonate
+            pr_ms=200,   # Too long for neonate
+            qrs_ms=100,  # Too wide for neonate
+            qtc_ms=500,  # Long QT
+            axis_deg=0,  # LAD
+            sex="boys"
+        )
+        assert result.pass_rate < 50  # Many should be out of range
+
+
+class TestPTBXLReference:
+    """Tests for PTB-XL adult reference values."""
+
+    def test_ptbxl_structure(self):
+        """Test PTBXL_REFERENCE structure."""
+        assert "metadata" in PTBXL_REFERENCE
+        assert "heart_rate" in PTBXL_REFERENCE
+        assert "qrs_duration" in PTBXL_REFERENCE
+        assert "qtc_interval" in PTBXL_REFERENCE
+
+    def test_compare_to_ptbxl(self):
+        """Test comparison against PTB-XL."""
+        # Generate synthetic values around normal
+        synthetic_hrs = np.random.normal(75, 15, 100)
+        result = compare_to_ptbxl("heart_rate", synthetic_hrs, "normal")
+        assert result.parameter == "heart_rate"
+        assert abs(result.z_score_mean) < 2  # Should be reasonable
+
+    def test_ptbxl_class_mapping(self):
+        """Test diagnosis to PTB-XL class mapping."""
+        assert get_ptbxl_class("RBBB") == "rbbb"
+        assert get_ptbxl_class("LVH") == "lvh"
+        assert get_ptbxl_class("Unknown diagnosis") == "all"
 
 
 if __name__ == "__main__":

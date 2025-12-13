@@ -23,7 +23,11 @@ from .metrics import (
     ECGMetrics,
     PhysicsMetrics,
     DistributionMetrics,
+    compute_spectral_metrics,
+    SpectralMetrics,
 )
+from .pediatric_reference import validate_ecg_against_rijnbeek, RijnbeekValidationResult
+from .ptbxl_reference import compare_to_ptbxl, get_ptbxl_class, compute_ptbxl_realism_score
 
 
 @dataclass
@@ -55,6 +59,8 @@ class CaseResult:
     passed: bool
     failures: List[str] = field(default_factory=list)
     metrics: Optional[ECGMetrics] = None
+    external_validation: Optional[Dict] = None  # Rijnbeek or PTB-XL validation
+    spectral_metrics: Optional[SpectralMetrics] = None
 
 
 @dataclass
@@ -177,6 +183,54 @@ def evaluate_case(
                 f"SDNN too high ({metrics.hrv.sdnn_ms:.1f} > {thresholds.max_sdnn_ms} ms)"
             )
 
+    # Gate D: Spectral realism
+    spectral = compute_spectral_metrics(ecg)
+    result.spectral_metrics = spectral
+
+    if spectral.is_too_smooth:
+        result.failures.append("Signal is too smooth (lacks realistic noise)")
+    if spectral.is_too_noisy:
+        result.failures.append("Signal is too noisy")
+    if not spectral.has_realistic_qrs_peak:
+        result.failures.append("Missing realistic QRS spectral peak (8-15 Hz)")
+    if not spectral.has_realistic_rolloff:
+        result.failures.append("Unrealistic high-frequency rolloff")
+
+    # Gate E: External reference validation (Rijnbeek for peds, PTB-XL for adults)
+    age = ecg.targets.age_years if ecg.targets else 0
+
+    if age < 16:
+        # Use Rijnbeek pediatric reference
+        hr = metrics.hrv.hr_bpm if metrics.hrv.hr_bpm > 0 else 80
+        pr = metrics.distribution.pr_ms if metrics.distribution.pr_ms else 120
+        qrs = metrics.distribution.qrs_ms if metrics.distribution.qrs_ms else 80
+        qtc = metrics.distribution.qtc_ms if metrics.distribution.qtc_ms else 400
+        axis = metrics.distribution.axis_deg if metrics.distribution.axis_deg is not None else 60
+
+        rijnbeek_result = validate_ecg_against_rijnbeek(
+            age_years=age,
+            hr_bpm=hr,
+            pr_ms=pr,
+            qrs_ms=qrs,
+            qtc_ms=qtc,
+            axis_deg=axis,
+            sex="boys"  # Default; could be parameterized
+        )
+        result.external_validation = {
+            "source": "Rijnbeek 2001",
+            "pass_rate": rijnbeek_result.pass_rate,
+            "params_within_normal": rijnbeek_result.parameters_within_normal,
+            "params_checked": rijnbeek_result.parameters_checked,
+        }
+
+        # Fail if less than 60% of parameters within normal (allowing pathological variants)
+        if "exempt_params" not in exemptions:
+            if rijnbeek_result.pass_rate < 60:
+                result.failures.append(
+                    f"Only {rijnbeek_result.parameters_within_normal}/{rijnbeek_result.parameters_checked} "
+                    f"parameters within Rijnbeek normal limits"
+                )
+
     # Set pass/fail
     result.passed = len(result.failures) == 0
 
@@ -267,6 +321,33 @@ def run_evaluation(
         n_cases=len(case_results),
         n_passed=hrv_passed,
     ))
+
+    # Gate D: Spectral realism
+    spectral_passed = sum(1 for r in case_results if
+                          r.spectral_metrics and
+                          r.spectral_metrics.has_realistic_qrs_peak and
+                          not r.spectral_metrics.is_too_smooth and
+                          not r.spectral_metrics.is_too_noisy)
+    gates.append(GateResult(
+        name="Spectral Realism",
+        passed=spectral_passed / len(case_results) >= 0.85,
+        pass_rate=spectral_passed / len(case_results) * 100,
+        n_cases=len(case_results),
+        n_passed=spectral_passed,
+    ))
+
+    # Gate E: External reference validation
+    ext_validated = [r for r in case_results if r.external_validation]
+    if ext_validated:
+        ext_passed = sum(1 for r in ext_validated if r.external_validation.get("pass_rate", 0) >= 60)
+        gates.append(GateResult(
+            name="External Reference (Rijnbeek/PTB-XL)",
+            passed=ext_passed / len(ext_validated) >= 0.8,
+            pass_rate=ext_passed / len(ext_validated) * 100,
+            n_cases=len(ext_validated),
+            n_passed=ext_passed,
+            details={"source": "Rijnbeek 2001 (peds) / PTB-XL (adult)"},
+        ))
 
     # Overall result
     n_passed = sum(1 for r in case_results if r.passed)

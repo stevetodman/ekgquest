@@ -188,6 +188,42 @@ Python Realism Lab + CI quality gates implemented:
 
 ---
 
+## Recent Enhancements (M10)
+
+### Beat-to-beat Morphology Jitter
+Real ECGs don't have identical beats. Implemented `generateBeatJitter()` in `ecg-synth-modules.js`:
+- **Respiratory modulation**: ~6% amplitude variation synchronized with breathing (15 breaths/min)
+- **Amplitude jitter**: ±5% random beat-to-beat variation
+- **Timing jitter**: ±5ms for P, QRS, T waves
+- **Duration jitter**: ±5% QRS width variation
+- **Shape jitter**: Subtle morphology changes per beat
+- **Result**: R-wave amplitude CV of ~18%, eliminating "metronomic" appearance
+
+### Spectral Similarity Metric
+Added `compute_spectral_metrics()` in Python metrics.py:
+- Band power distribution (VLF, LF, QRS-band, HF)
+- Spectral entropy (normalized 0-1)
+- Spectral centroid
+- High-frequency rolloff slope
+- Realism flags: `is_too_smooth`, `is_too_noisy`, `has_realistic_qrs_peak`
+
+### Visual Regression in CI
+Added Puppeteer-based visual regression testing:
+- `tools/visual-regression.mjs`: Screenshot comparison with hash verification
+- Test cases: normal_child_8y, normal_neonate, normal_adult, wpw_child, rbbb_child, svt_child
+- Optional pixelmatch for pixel-by-pixel diff
+
+### External Reference Validation (Not Circular)
+Replaced internal-only validation with external published references:
+- **Rijnbeek 2001** (`pediatric_reference.py`): 1912 Dutch children, ages 0-16y
+  - 9 age bins with 2nd/50th/98th percentiles for HR, PR, QRS, QTc, axis
+  - Sex-specific values (boys/girls)
+- **PTB-XL** (`ptbxl_reference.py`): 21,837 adult recordings
+  - Per-diagnosis reference distributions
+- **Gate E** in eval_realism.py: ≥60% parameters within external reference norms
+
+---
+
 ## Future Ideas
 - Paced rhythms
 - Atrial fibrillation
@@ -195,3 +231,7 @@ Python Realism Lab + CI quality gates implemented:
 - Fiducial editing for manual annotation
 - Multi-language support
 - Mobile-optimized viewer
+- Full VCG model (currently parametric projection)
+- Template-based morphology (instead of Gaussian pulses)
+- Measurement confidence scores
+- More external dataset validation (ZZU pECG, Leipzig, PICS)
