@@ -116,42 +116,45 @@ Age-dependent heart orientation implemented in `ecg-synth-modules.js`:
 - **VCG rotation**: Applied before electrode projection in `leadFieldModel()`
 - **Options API**: `leadFieldModel(vcg, geometry, { ageY, seed, applyRotation })`
 
-### Step 5: Correlated artifact/noise model
-Build noise in electrode space (before lead derivation) for consistent cross-lead behavior:
+### Step 5: Correlated artifact/noise model ✅
+Realistic noise generation implemented in `ecg-synth-modules.js`:
 
-- **Baseline wander**: Sinusoids + colored noise, correlated across leads
-- **Mains interference**: 50/60 Hz + harmonics, amplitude-modulated
+- **Baseline wander**: `generateColoredNoise()` with 1/f spectrum + sinusoidal components
+- **Mains interference**: `generatePowerlineNoise()` with 60Hz fundamental + harmonics (120, 180, 240 Hz), amplitude-modulated
 - **EMG**: Band-limited (20–150 Hz) with nonstationary envelope
-- **Electrode motion**: Transient shifts with bi-exponential recovery
-- **Impedance drift**: Slow drift + occasional step changes
+- **Electrode motion**: `generateMotionArtifacts()` with transient shifts + bi-exponential recovery (τ1=0.05s, τ2=0.3s)
+- **Impedance drift**: `generateImpedanceDrift()` with slow random walk + occasional step changes
+- **Presets**: `ARTIFACT_PRESETS` (none, minimal, typical, noisy, exercise) with motion/impedance parameters
 
-**Done when**: Noise behaves consistently across leads, realistic baseline and HF texture.
+### Step 6: Device model ✅
+Realistic ECG device simulation implemented in `ecg-synth-modules.js`:
 
-### Step 6: Device model
-Add signal processing typical of ECG devices:
+- **Filter modes**: `DEVICE_PRESETS` with diagnostic, monitor, exercise, holter, highres modes
+- **Filter implementation**: 2nd-order Butterworth biquads with zero-phase filtfilt
+  - `calcBiquadCoeffs()` for lowpass/highpass/notch filter design
+  - `applyBiquad()` Direct Form II Transposed implementation
+  - `applyNotchFilter()` for 50/60 Hz powerline rejection
+- **Quantization & clipping**: `simulateADC(bits, rangeUV)` with configurable resolution (12-16 bit) and clipping
+- **Sampling**: `downsample(inputFs, outputFs)` with anti-aliasing filter
+- **Output modes**: Each preset specifies bandwidth, notch filter, ADC bits, and output sampling rate
 
-- **Filter modes**: Diagnostic vs Monitor presets
-- **Filter implementation**: IIR/FIR with defined frequency responses
-- **Quantization & clipping**: ADC resolution, saturation behavior
-- **Sampling**: Generate at 1000 Hz, downsample to 500/250 with anti-aliasing
+### Step 7: Data-driven calibration ✅
+Pediatric ECG priors implemented in `ecg-synth-modules.js`:
 
-**Done when**: Diagnostic/Monitor toggles produce noticeably different clinical looks.
+- **`PEDIATRIC_PRIORS`**: Embedded reference distributions from published literature
+  - 10 age bins: neonate → young adult
+  - Parameters: HR, PR, QRS, QTc, P/QRS/T axes with mean and SD
+  - Morphology priors: rvDom, juvenileT by age
+  - Sex adjustments: QTc offset, QRS factor, voltage factor
+- **`getAgeBin(ageY)`**: Returns appropriate age bin for any age
+- **`samplePediatricPriors(ageY, seed, sex)`**: Sample realistic ECG parameters
+  - Truncated normal sampling within physiological bounds
+  - Age-appropriate values with inter-individual variation
+  - Sex-specific adjustments
+- **`computeZScore(param, value, ageY)`**: Calculate z-score for any measurement
+- **`checkNormalLimits(param, value, ageY)`**: Clinical interpretation of values
 
-### Step 7: Data-driven calibration
-Calibrate generator parameters against real ECG feature distributions:
-
-**Feature extractor** (per case, by age bin):
-- HR, PR, QRS, QT, QTc distributions
-- Axis distributions
-- R/S amplitude progression V1→V6
-- QRS energy distribution across leads
-- Lead covariance / coherence
-- Noise PSD in baseline segments
-- Artifact event rates
-
-**Optimization**: Minimize distribution distance (Wasserstein/MMD/KL) to reference data.
-
-**Done when**: Synthetic population histograms match reference within thresholds.
+References: Rijnbeek et al. 2001/2014, Bratincsák et al. 2020, Davignon et al. 1979
 
 ### Step 8: Indistinguishability evaluation harness
 Quality assurance without enabling misuse:

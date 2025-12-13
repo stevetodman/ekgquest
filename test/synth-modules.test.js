@@ -36,6 +36,20 @@ import {
   getHeartOrientationParams,
   createRotationMatrix,
   generateHeartOrientation,
+  // Device model (Step 6)
+  calcBiquadCoeffs,
+  applyBiquad,
+  applyNotchFilter,
+  applyLowpass2,
+  applyHighpass2,
+  simulateADC,
+  downsample,
+  // Pediatric priors (Step 7)
+  PEDIATRIC_PRIORS,
+  getAgeBin,
+  samplePediatricPriors,
+  computeZScore,
+  checkNormalLimits,
 } from "../viewer/js/ecg-synth-modules.js";
 import { ageDefaults, applyDx, DIAGNOSES } from "../viewer/js/ecg-synth.js";
 import { normalizeECGData, detectRPeaks, physicsChecks } from "../viewer/js/ecg-core.js";
@@ -284,6 +298,170 @@ async function run() {
     console.log(`  leadFieldModel() rotation effect: OK (maxDiff=${maxDiff.toFixed(4)})`);
   }
 
+  // Test Device Model Components (Step 6)
+  console.log("\nTest 1e: Device Model Components");
+  {
+    // Test calcBiquadCoeffs for lowpass
+    const lpCoeffs = calcBiquadCoeffs('lowpass', 40, 1000, 0.7071);
+    assert.ok(lpCoeffs.b0 !== undefined, "Should have b0 coefficient");
+    assert.ok(lpCoeffs.a1 !== undefined, "Should have a1 coefficient");
+    console.log("  calcBiquadCoeffs() lowpass: OK");
+
+    // Test calcBiquadCoeffs for highpass
+    const hpCoeffs = calcBiquadCoeffs('highpass', 0.5, 1000, 0.7071);
+    assert.ok(hpCoeffs.b0 !== undefined, "Should have b0 coefficient");
+    console.log("  calcBiquadCoeffs() highpass: OK");
+
+    // Test calcBiquadCoeffs for notch
+    const notchCoeffs = calcBiquadCoeffs('notch', 60, 1000, 30);
+    assert.ok(notchCoeffs.b0 !== undefined, "Should have b0 coefficient");
+    console.log("  calcBiquadCoeffs() notch: OK");
+
+    // Test applyBiquad on a simple signal
+    const testSignal = new Float64Array(100);
+    for (let i = 0; i < 100; i++) {
+      testSignal[i] = Math.sin(2 * Math.PI * 50 * i / 1000); // 50 Hz sine
+    }
+    const filteredSignal = applyBiquad(testSignal, lpCoeffs);
+    assert.strictEqual(filteredSignal.length, testSignal.length, "Filtered signal should have same length");
+    assert.ok(filteredSignal instanceof Float64Array, "Should return Float64Array");
+    console.log("  applyBiquad(): OK");
+
+    // Test applyNotchFilter removes 60 Hz
+    const noisySignal = new Float64Array(1000);
+    for (let i = 0; i < 1000; i++) {
+      noisySignal[i] = Math.sin(2 * Math.PI * 10 * i / 1000) + // 10 Hz signal
+                       0.5 * Math.sin(2 * Math.PI * 60 * i / 1000); // 60 Hz noise
+    }
+    const notchedSignal = applyNotchFilter(noisySignal, 1000, 60, 30);
+    // Calculate power at 60 Hz after notching
+    let power60Before = 0, power60After = 0;
+    for (let i = 0; i < 1000; i++) {
+      const carrier = Math.sin(2 * Math.PI * 60 * i / 1000);
+      power60Before += noisySignal[i] * carrier;
+      power60After += notchedSignal[i] * carrier;
+    }
+    assert.ok(Math.abs(power60After) < Math.abs(power60Before) * 0.3, "Notch should reduce 60 Hz power");
+    console.log("  applyNotchFilter(): OK (60 Hz attenuation verified)");
+
+    // Test applyLowpass2
+    const lpFiltered = applyLowpass2(testSignal, 1000, 40);
+    assert.strictEqual(lpFiltered.length, testSignal.length, "LP2 output length should match");
+    console.log("  applyLowpass2(): OK");
+
+    // Test applyHighpass2
+    const hpFiltered = applyHighpass2(testSignal, 1000, 0.5);
+    assert.strictEqual(hpFiltered.length, testSignal.length, "HP2 output length should match");
+    console.log("  applyHighpass2(): OK");
+
+    // Test simulateADC
+    const analogSignal = new Float64Array(100);
+    for (let i = 0; i < 100; i++) {
+      analogSignal[i] = 5 * Math.sin(2 * Math.PI * i / 100); // ±5 mV signal
+    }
+    const quantized16 = simulateADC(analogSignal, 16, 10000); // 16-bit, ±10mV range
+    const quantized12 = simulateADC(analogSignal, 12, 10000); // 12-bit, ±10mV range
+    // 12-bit should have larger quantization steps than 16-bit
+    let maxDiff16 = 0, maxDiff12 = 0;
+    for (let i = 0; i < 100; i++) {
+      maxDiff16 = Math.max(maxDiff16, Math.abs(quantized16[i] - analogSignal[i]));
+      maxDiff12 = Math.max(maxDiff12, Math.abs(quantized12[i] - analogSignal[i]));
+    }
+    assert.ok(maxDiff12 > maxDiff16, "12-bit ADC should have larger quantization error than 16-bit");
+    console.log(`  simulateADC(): OK (12-bit err=${(maxDiff12*1000).toFixed(2)}µV, 16-bit err=${(maxDiff16*1000).toFixed(2)}µV)`);
+
+    // Test ADC clipping
+    const largeSignal = new Float64Array([15, -15, 5, -5]); // ±15mV exceeds ±10mV range
+    const clipped = simulateADC(largeSignal, 16, 10000);
+    assert.ok(Math.abs(clipped[0]) <= 10, "Should clip at +10mV");
+    assert.ok(Math.abs(clipped[1]) <= 10, "Should clip at -10mV");
+    console.log("  simulateADC() clipping: OK");
+
+    // Test downsample
+    const hiRate = new Float64Array(1000);
+    for (let i = 0; i < 1000; i++) {
+      hiRate[i] = Math.sin(2 * Math.PI * 10 * i / 1000); // 10 Hz at 1000 Hz sampling
+    }
+    const loRate500 = downsample(hiRate, 1000, 500);
+    assert.strictEqual(loRate500.length, 500, "Downsample 1000→500 should halve samples");
+    const loRate250 = downsample(hiRate, 1000, 250);
+    assert.strictEqual(loRate250.length, 250, "Downsample 1000→250 should quarter samples");
+    console.log("  downsample(): OK (1000→500: 500 samples, 1000→250: 250 samples)");
+
+    // Test no downsampling when output >= input
+    const noDownsample = downsample(hiRate, 1000, 1000);
+    assert.strictEqual(noDownsample, hiRate, "Same rate should return original array");
+    console.log("  downsample() passthrough: OK");
+  }
+
+  // Test Pediatric Priors (Step 7)
+  console.log("\nTest 1f: Pediatric Priors");
+  {
+    // Test PEDIATRIC_PRIORS structure
+    assert.ok(PEDIATRIC_PRIORS.age_bins.length > 0, "Should have age bins");
+    assert.ok(PEDIATRIC_PRIORS.morphology, "Should have morphology data");
+    assert.ok(PEDIATRIC_PRIORS.sex_adjustments, "Should have sex adjustments");
+    console.log(`  PEDIATRIC_PRIORS: ${PEDIATRIC_PRIORS.age_bins.length} age bins`);
+
+    // Test getAgeBin for various ages
+    const neonateBin = getAgeBin(0.02);
+    assert.strictEqual(neonateBin.id, "neonate", "0.02 years should be neonate");
+    const toddlerBin = getAgeBin(2);
+    assert.strictEqual(toddlerBin.id, "toddler", "2 years should be toddler");
+    const adolescentBin = getAgeBin(14);
+    assert.strictEqual(adolescentBin.id, "adolescent", "14 years should be adolescent");
+    const adultBin = getAgeBin(35);
+    assert.strictEqual(adultBin.id, "young_adult", "35 years should be young_adult");
+    console.log("  getAgeBin(): OK");
+
+    // Test samplePediatricPriors
+    const priors1 = samplePediatricPriors(8, 12345);
+    assert.ok(priors1.HR > 0 && priors1.HR < 200, "HR should be reasonable");
+    assert.ok(priors1.PR > 0 && priors1.PR < 0.3, "PR should be reasonable");
+    assert.ok(priors1.QRS > 0 && priors1.QRS < 0.2, "QRS should be reasonable");
+    assert.ok(priors1._ageBin, "Should include age bin");
+    console.log(`  samplePediatricPriors(8, 12345): HR=${priors1.HR.toFixed(0)}, PR=${(priors1.PR*1000).toFixed(0)}ms, QRS=${(priors1.QRS*1000).toFixed(0)}ms`);
+
+    // Test reproducibility
+    const priors2 = samplePediatricPriors(8, 12345);
+    assert.strictEqual(priors1.HR, priors2.HR, "Same seed should produce same HR");
+    assert.strictEqual(priors1.QRS, priors2.QRS, "Same seed should produce same QRS");
+    console.log("  samplePediatricPriors() reproducibility: OK");
+
+    // Test age-appropriate values
+    const neonatePriors = samplePediatricPriors(0.05, 99);
+    const adultPriors = samplePediatricPriors(35, 99);
+    assert.ok(neonatePriors.HR > adultPriors.HR, "Neonate HR should be higher than adult");
+    assert.ok(neonatePriors.QRSaxis > adultPriors.QRSaxis, "Neonate QRS axis should be more rightward");
+    assert.ok(neonatePriors.rvDom > adultPriors.rvDom, "Neonate RV dominance should be higher");
+    console.log(`  Age-appropriate priors: neonate HR=${neonatePriors.HR.toFixed(0)}, adult HR=${adultPriors.HR.toFixed(0)}`);
+
+    // Test sex adjustments
+    const malePriors = samplePediatricPriors(12, 555, 'male');
+    const femalePriors = samplePediatricPriors(12, 555, 'female');
+    assert.ok(malePriors.QTc < femalePriors.QTc, "Male QTc should be shorter than female");
+    console.log(`  Sex adjustments: male QTc=${(malePriors.QTc*1000).toFixed(0)}ms, female QTc=${(femalePriors.QTc*1000).toFixed(0)}ms`);
+
+    // Test computeZScore
+    const hrZscore = computeZScore('HR', 80, 8);
+    assert.ok(typeof hrZscore === 'number', "Z-score should be a number");
+    const extremeZ = computeZScore('HR', 150, 35);
+    assert.ok(Math.abs(extremeZ) > 2, "HR 150 in adult should have large z-score");
+    console.log(`  computeZScore(): HR=80 at age 8 -> z=${hrZscore.toFixed(2)}`);
+
+    // Test checkNormalLimits
+    const normalCheck = checkNormalLimits('HR', 80, 8);
+    assert.ok(normalCheck.normal !== null, "Should return normal status");
+    assert.ok(normalCheck.interpretation, "Should return interpretation");
+    console.log(`  checkNormalLimits(): HR=80 at age 8 -> ${normalCheck.interpretation} (z=${normalCheck.zScore.toFixed(2)})`);
+
+    // Test abnormal value detection
+    const tachyCheck = checkNormalLimits('HR', 170, 8);
+    assert.ok(!tachyCheck.normal, "HR 170 at age 8 should be abnormal");
+    assert.ok(tachyCheck.zScore > 2, "HR 170 at age 8 should have z>2");
+    console.log(`  Abnormal detection: HR=170 at age 8 -> ${tachyCheck.interpretation}`);
+  }
+
   // Test Module 1: Rhythm Model
   console.log("\nTest 2: Module 1 - Rhythm Model");
   {
@@ -414,19 +592,29 @@ async function run() {
     const vcg = morphologyModel(beatSchedule, params, "Normal sinus", fs, N, 42);
     const phi = leadFieldModel(vcg);
 
-    // Test with no noise
-    const leadsClean = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.none, DEVICE_PRESETS.diagnostic, false, true);
-    assert.ok(leadsClean.I instanceof Float64Array, "Clean leads should work");
+    // Test with no noise (diagnostic mode)
+    const resultClean = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.none, DEVICE_PRESETS.diagnostic, false, true);
+    assert.ok(resultClean.leads.I instanceof Float64Array, "Clean leads should work");
+    assert.strictEqual(resultClean.fs, 1000, "Diagnostic mode should output at 1000 Hz");
 
     // Test with typical noise
-    const leadsNoisy = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.typical, DEVICE_PRESETS.diagnostic, true, true);
-    assert.ok(leadsNoisy.I instanceof Float64Array, "Noisy leads should work");
+    const resultNoisy = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.typical, DEVICE_PRESETS.diagnostic, true, true);
+    assert.ok(resultNoisy.leads.I instanceof Float64Array, "Noisy leads should work");
 
-    // Test monitor mode
-    const leadsMonitor = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.typical, DEVICE_PRESETS.monitor, true, true);
-    assert.ok(leadsMonitor.I instanceof Float64Array, "Monitor mode should work");
+    // Test monitor mode (should downsample to 500 Hz)
+    const resultMonitor = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.typical, DEVICE_PRESETS.monitor, true, true);
+    assert.ok(resultMonitor.leads.I instanceof Float64Array, "Monitor mode should work");
+    assert.strictEqual(resultMonitor.fs, 500, "Monitor mode should output at 500 Hz");
+    assert.ok(resultMonitor.leads.I.length < resultClean.leads.I.length, "Monitor mode should have fewer samples");
+
+    // Test holter mode (should downsample to 250 Hz)
+    const resultHolter = deviceAndArtifactModel(phi, fs, 42, ARTIFACT_PRESETS.minimal, DEVICE_PRESETS.holter, true, true);
+    assert.strictEqual(resultHolter.fs, 250, "Holter mode should output at 250 Hz");
 
     console.log("  All device/artifact presets work");
+    console.log(`    Diagnostic: ${resultClean.leads.I.length} samples @ ${resultClean.fs} Hz`);
+    console.log(`    Monitor: ${resultMonitor.leads.I.length} samples @ ${resultMonitor.fs} Hz`);
+    console.log(`    Holter: ${resultHolter.leads.I.length} samples @ ${resultHolter.fs} Hz`);
   }
 
   // Test integrated synthesis
@@ -438,7 +626,7 @@ async function run() {
     assert.strictEqual(ecg.duration_s, 10.0, "Duration should be 10s");
     assert.ok(ecg.targets.synthetic === true, "Should be marked synthetic");
     assert.ok(ecg.targets.generator_version, "Should have generator version");
-    assert.ok(ecg.targets.generator_version.includes("hrv"), "Generator version should include 'hrv'");
+    assert.ok(ecg.targets.generator_version.includes("device"), "Generator version should include 'device'");
 
     // Verify HRV metrics are included in output
     assert.ok(ecg.targets.hrv, "Should include HRV metrics in targets");

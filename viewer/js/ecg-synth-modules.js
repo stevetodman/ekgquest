@@ -35,6 +35,186 @@ export function randn(rng) {
 }
 
 // ============================================================================
+// PEDIATRIC PRIORS (Step 7: Data-driven calibration)
+// Age/sex-conditioned parameter distributions from published literature
+// ============================================================================
+
+/**
+ * Embedded pediatric ECG normal value priors
+ * Based on: Rijnbeek et al. 2001/2014, Bratincsák et al. 2020, Davignon et al. 1979
+ */
+export const PEDIATRIC_PRIORS = {
+  age_bins: [
+    { id: "neonate", age_range: [0, 0.08], HR: { mean: 145, sd: 22 }, PR: { mean: 0.100, sd: 0.015 }, QRS: { mean: 0.060, sd: 0.008 }, QTc: { mean: 0.400, sd: 0.025 }, QRSaxis: { mean: 125, sd: 35 }, Taxis: { mean: 85, sd: 40 }, Paxis: { mean: 60, sd: 20 } },
+    { id: "infant_early", age_range: [0.08, 0.25], HR: { mean: 150, sd: 20 }, PR: { mean: 0.105, sd: 0.015 }, QRS: { mean: 0.062, sd: 0.008 }, QTc: { mean: 0.400, sd: 0.025 }, QRSaxis: { mean: 100, sd: 35 }, Taxis: { mean: 70, sd: 35 }, Paxis: { mean: 58, sd: 18 } },
+    { id: "infant_mid", age_range: [0.25, 0.5], HR: { mean: 140, sd: 20 }, PR: { mean: 0.110, sd: 0.018 }, QRS: { mean: 0.065, sd: 0.008 }, QTc: { mean: 0.405, sd: 0.025 }, QRSaxis: { mean: 85, sd: 35 }, Taxis: { mean: 55, sd: 30 }, Paxis: { mean: 55, sd: 18 } },
+    { id: "infant_late", age_range: [0.5, 1.0], HR: { mean: 130, sd: 18 }, PR: { mean: 0.115, sd: 0.020 }, QRS: { mean: 0.068, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.025 }, QRSaxis: { mean: 75, sd: 35 }, Taxis: { mean: 50, sd: 28 }, Paxis: { mean: 55, sd: 18 } },
+    { id: "toddler", age_range: [1.0, 3.0], HR: { mean: 115, sd: 18 }, PR: { mean: 0.120, sd: 0.020 }, QRS: { mean: 0.070, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.025 }, QRSaxis: { mean: 65, sd: 30 }, Taxis: { mean: 45, sd: 25 }, Paxis: { mean: 55, sd: 16 } },
+    { id: "preschool", age_range: [3.0, 5.0], HR: { mean: 100, sd: 15 }, PR: { mean: 0.130, sd: 0.022 }, QRS: { mean: 0.072, sd: 0.008 }, QTc: { mean: 0.410, sd: 0.022 }, QRSaxis: { mean: 60, sd: 28 }, Taxis: { mean: 40, sd: 22 }, Paxis: { mean: 52, sd: 15 } },
+    { id: "school_early", age_range: [5.0, 8.0], HR: { mean: 90, sd: 14 }, PR: { mean: 0.140, sd: 0.024 }, QRS: { mean: 0.076, sd: 0.010 }, QTc: { mean: 0.410, sd: 0.022 }, QRSaxis: { mean: 58, sd: 26 }, Taxis: { mean: 38, sd: 20 }, Paxis: { mean: 50, sd: 15 } },
+    { id: "school_late", age_range: [8.0, 12.0], HR: { mean: 80, sd: 12 }, PR: { mean: 0.150, sd: 0.026 }, QRS: { mean: 0.080, sd: 0.010 }, QTc: { mean: 0.410, sd: 0.020 }, QRSaxis: { mean: 55, sd: 25 }, Taxis: { mean: 38, sd: 18 }, Paxis: { mean: 50, sd: 14 } },
+    { id: "adolescent", age_range: [12.0, 16.0], HR: { mean: 75, sd: 12 }, PR: { mean: 0.155, sd: 0.028 }, QRS: { mean: 0.085, sd: 0.012 }, QTc: { mean: 0.410, sd: 0.020 }, QRSaxis: { mean: 52, sd: 24 }, Taxis: { mean: 38, sd: 18 }, Paxis: { mean: 50, sd: 14 } },
+    { id: "young_adult", age_range: [16.0, 100.0], HR: { mean: 70, sd: 12 }, PR: { mean: 0.160, sd: 0.028 }, QRS: { mean: 0.090, sd: 0.012 }, QTc: { mean: 0.410, sd: 0.020 }, QRSaxis: { mean: 50, sd: 30 }, Taxis: { mean: 40, sd: 20 }, Paxis: { mean: 50, sd: 15 } },
+  ],
+  morphology: {
+    rvDom: [{ age: 0, mean: 1.0, sd: 0.05 }, { age: 0.5, mean: 0.9, sd: 0.08 }, { age: 1, mean: 0.8, sd: 0.1 }, { age: 3, mean: 0.6, sd: 0.12 }, { age: 8, mean: 0.4, sd: 0.12 }, { age: 12, mean: 0.25, sd: 0.1 }, { age: 16, mean: 0.15, sd: 0.08 }],
+    juvenileT: [{ age: 0, mean: 1.0, sd: 0.05 }, { age: 1, mean: 0.9, sd: 0.08 }, { age: 4, mean: 0.75, sd: 0.12 }, { age: 8, mean: 0.5, sd: 0.15 }, { age: 12, mean: 0.25, sd: 0.12 }, { age: 16, mean: 0.1, sd: 0.08 }],
+  },
+  sex_adjustments: {
+    male: { QTc_offset: -0.01, QRS_factor: 1.05, voltage_factor: 1.1 },
+    female: { QTc_offset: 0.01, QRS_factor: 0.95, voltage_factor: 0.9 },
+  },
+};
+
+/**
+ * Get the appropriate age bin for a given age
+ * @param {number} ageY - Age in years
+ * @returns {object} Age bin with prior distributions
+ */
+export function getAgeBin(ageY) {
+  for (const bin of PEDIATRIC_PRIORS.age_bins) {
+    if (ageY >= bin.age_range[0] && ageY < bin.age_range[1]) {
+      return bin;
+    }
+  }
+  // Return last bin (young_adult) for ages >= 16
+  return PEDIATRIC_PRIORS.age_bins[PEDIATRIC_PRIORS.age_bins.length - 1];
+}
+
+/**
+ * Interpolate morphology parameter from age-indexed array
+ * @param {number} ageY - Age in years
+ * @param {Array} ageArray - Array of {age, mean, sd} objects
+ * @returns {object} {mean, sd} for interpolated age
+ */
+function interpMorphology(ageY, ageArray) {
+  if (ageY <= ageArray[0].age) return { mean: ageArray[0].mean, sd: ageArray[0].sd };
+  if (ageY >= ageArray[ageArray.length - 1].age) {
+    const last = ageArray[ageArray.length - 1];
+    return { mean: last.mean, sd: last.sd };
+  }
+  // Find bracketing ages
+  for (let i = 0; i < ageArray.length - 1; i++) {
+    if (ageY >= ageArray[i].age && ageY < ageArray[i + 1].age) {
+      const t = (ageY - ageArray[i].age) / (ageArray[i + 1].age - ageArray[i].age);
+      return {
+        mean: lerp(ageArray[i].mean, ageArray[i + 1].mean, t),
+        sd: lerp(ageArray[i].sd, ageArray[i + 1].sd, t),
+      };
+    }
+  }
+  return { mean: ageArray[0].mean, sd: ageArray[0].sd };
+}
+
+/**
+ * Sample ECG parameters from pediatric priors for a given age
+ * Uses truncated normal distributions to stay within physiological bounds
+ * @param {number} ageY - Age in years
+ * @param {number} seed - Random seed for reproducibility
+ * @param {string} sex - Optional sex ('male', 'female', or null for neutral)
+ * @returns {object} Sampled ECG parameters with realistic variation
+ */
+export function samplePediatricPriors(ageY, seed, sex = null) {
+  const rng = mulberry32(seed + 7777); // Offset to avoid correlation with other uses
+  const bin = getAgeBin(ageY);
+
+  // Helper to sample from truncated normal (within ±2.5 SD)
+  function sampleTruncNorm(mean, sd, minVal, maxVal) {
+    let val;
+    for (let i = 0; i < 10; i++) {
+      val = mean + randn(rng) * sd;
+      if (val >= minVal && val <= maxVal) return val;
+    }
+    return clamp(val, minVal, maxVal);
+  }
+
+  // Sample main parameters from age bin
+  let HR = sampleTruncNorm(bin.HR.mean, bin.HR.sd, 40, 220);
+  let PR = sampleTruncNorm(bin.PR.mean, bin.PR.sd, 0.06, 0.30);
+  let QRS = sampleTruncNorm(bin.QRS.mean, bin.QRS.sd, 0.04, 0.16);
+  let QTc = sampleTruncNorm(bin.QTc.mean, bin.QTc.sd, 0.32, 0.50);
+  let QRSaxis = sampleTruncNorm(bin.QRSaxis.mean, bin.QRSaxis.sd, -90, 180);
+  let Taxis = sampleTruncNorm(bin.Taxis.mean, bin.Taxis.sd, -90, 180);
+  let Paxis = sampleTruncNorm(bin.Paxis.mean, bin.Paxis.sd, 0, 90);
+
+  // Sample morphology parameters
+  const rvDomPrior = interpMorphology(ageY, PEDIATRIC_PRIORS.morphology.rvDom);
+  const juvenileTPrior = interpMorphology(ageY, PEDIATRIC_PRIORS.morphology.juvenileT);
+  const rvDom = sampleTruncNorm(rvDomPrior.mean, rvDomPrior.sd, 0, 1);
+  const juvenileT = sampleTruncNorm(juvenileTPrior.mean, juvenileTPrior.sd, 0, 1);
+
+  // Apply sex-specific adjustments
+  if (sex === 'male') {
+    QTc += PEDIATRIC_PRIORS.sex_adjustments.male.QTc_offset;
+    QRS *= PEDIATRIC_PRIORS.sex_adjustments.male.QRS_factor;
+  } else if (sex === 'female') {
+    QTc += PEDIATRIC_PRIORS.sex_adjustments.female.QTc_offset;
+    QRS *= PEDIATRIC_PRIORS.sex_adjustments.female.QRS_factor;
+  }
+
+  // Derived parameters
+  const zQ2 = lerp(0.75, 0.35, clamp(ageY / 16, 0, 1));
+  const zT = lerp(-0.6, -0.18, clamp(ageY / 16, 0, 1));
+
+  return {
+    HR,
+    PR,
+    QRS,
+    QTc,
+    Paxis,
+    QRSaxis,
+    Taxis,
+    rvDom,
+    juvenileT,
+    zQ2,
+    zT,
+    _ageBin: bin.id,
+    _priorSource: 'pediatric_priors_v1',
+  };
+}
+
+/**
+ * Get z-score for a measurement given age
+ * Useful for evaluating if a measurement is within normal limits
+ * @param {string} param - Parameter name (HR, PR, QRS, QTc, QRSaxis)
+ * @param {number} value - Measured value
+ * @param {number} ageY - Age in years
+ * @returns {number} Z-score (0 = mean, ±1 = 1 SD from mean)
+ */
+export function computeZScore(param, value, ageY) {
+  const bin = getAgeBin(ageY);
+  if (!bin[param]) return null;
+  const { mean, sd } = bin[param];
+  return (value - mean) / sd;
+}
+
+/**
+ * Check if a measurement is within normal limits for age
+ * @param {string} param - Parameter name
+ * @param {number} value - Measured value
+ * @param {number} ageY - Age in years
+ * @param {number} zLimit - Z-score limit (default 2 = 95% CI)
+ * @returns {object} {normal: boolean, zScore: number, interpretation: string}
+ */
+export function checkNormalLimits(param, value, ageY, zLimit = 2) {
+  const z = computeZScore(param, value, ageY);
+  if (z === null) return { normal: null, zScore: null, interpretation: 'Unknown parameter' };
+
+  const absZ = Math.abs(z);
+  let interpretation;
+  if (absZ <= 1) interpretation = 'Normal';
+  else if (absZ <= 2) interpretation = z > 0 ? 'High-normal' : 'Low-normal';
+  else if (absZ <= 3) interpretation = z > 0 ? 'Elevated' : 'Low';
+  else interpretation = z > 0 ? 'Markedly elevated' : 'Markedly low';
+
+  return {
+    normal: absZ <= zLimit,
+    zScore: z,
+    interpretation,
+  };
+}
+
+// ============================================================================
 // WAVE BASIS TOOLKIT (Step 2: Morphology Upgrade)
 // Provides primitives for realistic waveform generation in VCG domain
 // ============================================================================
@@ -1111,24 +1291,214 @@ export function deriveLeads(phi) {
 }
 
 // ============================================================================
-// MODULE 5: DEVICE AND ARTIFACT MODEL
-// Adds noise, artifacts, and applies device filtering
-// Input: leads, deviceParams, artifactParams, seed
-// Output: finalLeads (processed)
+// MODULE 5: DEVICE AND ARTIFACT MODEL (Step 5: Enhanced)
+// Adds realistic noise, artifacts, and applies device filtering
+// Features:
+// - Correlated baseline wander with colored noise
+// - Powerline interference with harmonics
+// - Band-limited EMG with nonstationary envelope
+// - Electrode motion artifacts (transient shifts)
+// - Impedance drift (slow + step changes)
 // ============================================================================
 
 export const DEVICE_PRESETS = {
-  diagnostic: { hpCutoff: 0.05, lpCutoff: 150, description: "Diagnostic mode (0.05-150 Hz)" },
-  monitor: { hpCutoff: 0.5, lpCutoff: 40, description: "Monitor mode (0.5-40 Hz)" },
+  diagnostic: {
+    hpCutoff: 0.05,
+    lpCutoff: 150,
+    notchFreq: null,        // No notch filter in diagnostic mode (preserves waveform)
+    filterOrder: 2,         // 2nd order Butterworth
+    adcBits: 16,            // 16-bit ADC (typical)
+    adcRangeUV: 10000,      // ±10mV input range
+    outputFs: 1000,         // Native sampling rate
+    description: "Diagnostic mode (0.05-150 Hz)"
+  },
+  monitor: {
+    hpCutoff: 0.5,
+    lpCutoff: 40,
+    notchFreq: 60,          // Notch filter enabled for cleaner display
+    filterOrder: 2,
+    adcBits: 12,            // Lower resolution acceptable
+    adcRangeUV: 10000,
+    outputFs: 500,          // Often downsampled for display
+    description: "Monitor mode (0.5-40 Hz)"
+  },
+  exercise: {
+    hpCutoff: 0.67,
+    lpCutoff: 40,
+    notchFreq: 60,
+    filterOrder: 2,
+    adcBits: 12,
+    adcRangeUV: 10000,
+    outputFs: 500,
+    description: "Exercise mode (0.67-40 Hz)"
+  },
+  holter: {
+    hpCutoff: 0.05,
+    lpCutoff: 100,
+    notchFreq: null,
+    filterOrder: 2,
+    adcBits: 12,
+    adcRangeUV: 10000,
+    outputFs: 250,          // Holter often uses 250 Hz for storage
+    description: "Holter mode (0.05-100 Hz, 250 Hz sampling)"
+  },
+  highres: {
+    hpCutoff: 0.05,
+    lpCutoff: 250,
+    notchFreq: null,
+    filterOrder: 2,
+    adcBits: 16,
+    adcRangeUV: 5000,       // Narrower range for better resolution
+    outputFs: 1000,
+    description: "High-resolution mode (0.05-250 Hz)"
+  },
 };
 
 export const ARTIFACT_PRESETS = {
-  none: { baseline: 0, powerline: 0, emg: 0, description: "No artifacts" },
-  minimal: { baseline: 0.02, powerline: 0.002, emg: 0.002, description: "Minimal artifacts" },
-  typical: { baseline: 0.04, powerline: 0.004, emg: 0.004, description: "Typical clinical artifacts" },
-  noisy: { baseline: 0.08, powerline: 0.008, emg: 0.008, description: "Noisy recording" },
+  none: {
+    baseline: 0, powerline: 0, emg: 0, motion: 0, impedance: 0,
+    description: "No artifacts"
+  },
+  minimal: {
+    baseline: 0.02, powerline: 0.002, emg: 0.002, motion: 0.01, impedance: 0.005,
+    description: "Minimal artifacts (ideal conditions)"
+  },
+  typical: {
+    baseline: 0.04, powerline: 0.004, emg: 0.004, motion: 0.02, impedance: 0.01,
+    description: "Typical clinical artifacts"
+  },
+  noisy: {
+    baseline: 0.08, powerline: 0.008, emg: 0.008, motion: 0.04, impedance: 0.02,
+    description: "Noisy recording (restless patient)"
+  },
+  exercise: {
+    baseline: 0.12, powerline: 0.003, emg: 0.015, motion: 0.06, impedance: 0.03,
+    description: "Exercise/stress test artifacts"
+  },
 };
 
+// ============================================================================
+// DIGITAL FILTER IMPLEMENTATIONS (Step 6: Device Model)
+// ============================================================================
+
+/**
+ * Biquad filter coefficient calculation
+ * Implements 2nd-order Butterworth sections
+ */
+export function calcBiquadCoeffs(type, fc, fs, Q = 0.7071) {
+  const w0 = 2 * Math.PI * fc / fs;
+  const cosW0 = Math.cos(w0);
+  const sinW0 = Math.sin(w0);
+  const alpha = sinW0 / (2 * Q);
+
+  let b0, b1, b2, a0, a1, a2;
+
+  switch (type) {
+    case 'lowpass':
+      b0 = (1 - cosW0) / 2;
+      b1 = 1 - cosW0;
+      b2 = (1 - cosW0) / 2;
+      a0 = 1 + alpha;
+      a1 = -2 * cosW0;
+      a2 = 1 - alpha;
+      break;
+    case 'highpass':
+      b0 = (1 + cosW0) / 2;
+      b1 = -(1 + cosW0);
+      b2 = (1 + cosW0) / 2;
+      a0 = 1 + alpha;
+      a1 = -2 * cosW0;
+      a2 = 1 - alpha;
+      break;
+    case 'notch':
+      b0 = 1;
+      b1 = -2 * cosW0;
+      b2 = 1;
+      a0 = 1 + alpha;
+      a1 = -2 * cosW0;
+      a2 = 1 - alpha;
+      break;
+    default:
+      throw new Error(`Unknown filter type: ${type}`);
+  }
+
+  // Normalize coefficients
+  return {
+    b0: b0 / a0,
+    b1: b1 / a0,
+    b2: b2 / a0,
+    a1: a1 / a0,
+    a2: a2 / a0,
+  };
+}
+
+/**
+ * Apply biquad filter (Direct Form II Transposed)
+ * More numerically stable implementation
+ */
+export function applyBiquad(x, coeffs) {
+  const { b0, b1, b2, a1, a2 } = coeffs;
+  const y = new Float64Array(x.length);
+  let z1 = 0, z2 = 0;
+
+  for (let i = 0; i < x.length; i++) {
+    const input = x[i];
+    const output = b0 * input + z1;
+    z1 = b1 * input - a1 * output + z2;
+    z2 = b2 * input - a2 * output;
+    y[i] = output;
+  }
+  return y;
+}
+
+/**
+ * Apply cascaded biquad sections for higher-order filter
+ * Forward-backward (filtfilt) for zero phase distortion
+ */
+function applyBiquadFiltfilt(x, coeffs) {
+  // Forward pass
+  let y = applyBiquad(x, coeffs);
+  // Reverse
+  y.reverse();
+  // Backward pass
+  y = applyBiquad(y, coeffs);
+  // Reverse back
+  y.reverse();
+  return y;
+}
+
+/**
+ * Notch filter for powerline interference removal
+ * @param {Float64Array} x - input signal
+ * @param {number} fs - sampling frequency
+ * @param {number} f0 - notch frequency (50 or 60 Hz)
+ * @param {number} Q - quality factor (higher = narrower notch)
+ */
+export function applyNotchFilter(x, fs, f0, Q = 30) {
+  const coeffs = calcBiquadCoeffs('notch', f0, fs, Q);
+  return applyBiquadFiltfilt(x, coeffs);
+}
+
+/**
+ * Apply 2nd order Butterworth lowpass filter
+ */
+export function applyLowpass2(x, fs, fc) {
+  // Q = 1/sqrt(2) for Butterworth response
+  const coeffs = calcBiquadCoeffs('lowpass', fc, fs, 0.7071);
+  return applyBiquadFiltfilt(x, coeffs);
+}
+
+/**
+ * Apply 2nd order Butterworth highpass filter
+ */
+export function applyHighpass2(x, fs, fc) {
+  const coeffs = calcBiquadCoeffs('highpass', fc, fs, 0.7071);
+  return applyBiquadFiltfilt(x, coeffs);
+}
+
+/**
+ * Simple 1st order highpass (for backwards compatibility and very low cutoffs)
+ */
 function highpass1(x, fs, fc) {
   const dt = 1 / fs;
   const RC = 1 / (2 * Math.PI * fc);
@@ -1141,6 +1511,9 @@ function highpass1(x, fs, fc) {
   return y;
 }
 
+/**
+ * Simple 1st order lowpass
+ */
 function lowpass1(x, fs, fc) {
   const dt = 1 / fs;
   const RC = 1 / (2 * Math.PI * fc);
@@ -1153,30 +1526,237 @@ function lowpass1(x, fs, fc) {
   return y;
 }
 
-function applyBandpass(x, fs, hpCutoff, lpCutoff) {
-  let y = highpass1(x, fs, hpCutoff);
-  y = lowpass1(y, fs, lpCutoff);
+/**
+ * Apply bandpass filter with specified order
+ * Uses cascaded biquads for order > 1
+ */
+function applyBandpass(x, fs, hpCutoff, lpCutoff, order = 2) {
+  let y;
+  if (order >= 2) {
+    // Use 2nd order Butterworth for better rolloff
+    // For very low HP cutoff (< 0.1 Hz), use 1st order to avoid instability
+    if (hpCutoff < 0.1) {
+      y = highpass1(x, fs, hpCutoff);
+    } else {
+      y = applyHighpass2(x, fs, hpCutoff);
+    }
+    y = applyLowpass2(y, fs, lpCutoff);
+  } else {
+    // 1st order filters
+    y = highpass1(x, fs, hpCutoff);
+    y = lowpass1(y, fs, lpCutoff);
+  }
   return y;
 }
 
+// ============================================================================
+// ADC SIMULATION (Step 6: Device Model)
+// ============================================================================
+
+/**
+ * Simulate ADC quantization and clipping
+ * @param {Float64Array} x - input signal (mV)
+ * @param {number} bits - ADC resolution in bits
+ * @param {number} rangeUV - full scale range in microvolts (±rangeUV)
+ * @returns {Float64Array} quantized signal
+ */
+export function simulateADC(x, bits, rangeUV) {
+  const rangeMV = rangeUV / 1000;  // Convert to mV
+  const levels = Math.pow(2, bits);
+  const lsb = (2 * rangeMV) / levels;  // LSB size in mV
+  const y = new Float64Array(x.length);
+
+  for (let i = 0; i < x.length; i++) {
+    // Clip to ADC range
+    let v = x[i];
+    if (v > rangeMV) v = rangeMV;
+    if (v < -rangeMV) v = -rangeMV;
+
+    // Quantize (round to nearest LSB)
+    v = Math.round(v / lsb) * lsb;
+    y[i] = v;
+  }
+
+  return y;
+}
+
+// ============================================================================
+// DOWNSAMPLING (Step 6: Device Model)
+// ============================================================================
+
+/**
+ * Downsample signal with anti-aliasing filter
+ * @param {Float64Array} x - input signal
+ * @param {number} inputFs - input sampling frequency
+ * @param {number} outputFs - target sampling frequency
+ * @returns {Float64Array} downsampled signal
+ */
+export function downsample(x, inputFs, outputFs) {
+  if (outputFs >= inputFs) return x;  // No downsampling needed
+
+  const ratio = inputFs / outputFs;
+  if (!Number.isInteger(ratio)) {
+    // Non-integer ratio - use nearest sample (simple but works for ECG)
+    const outputLen = Math.floor(x.length / ratio);
+    const y = new Float64Array(outputLen);
+    for (let i = 0; i < outputLen; i++) {
+      y[i] = x[Math.round(i * ratio)];
+    }
+    // Apply anti-alias filter (Nyquist = outputFs/2)
+    return applyLowpass2(y, outputFs, outputFs * 0.45);
+  }
+
+  // Integer ratio - apply anti-aliasing then decimate
+  // Anti-alias cutoff at 80% of new Nyquist to avoid aliasing
+  const antiAliasFreq = (outputFs / 2) * 0.8;
+  const filtered = applyLowpass2(x, inputFs, antiAliasFreq);
+
+  // Decimate
+  const outputLen = Math.floor(x.length / ratio);
+  const y = new Float64Array(outputLen);
+  for (let i = 0; i < outputLen; i++) {
+    y[i] = filtered[i * ratio];
+  }
+
+  return y;
+}
+
+/**
+ * Add EMG noise with nonstationary envelope
+ * Band-limited noise in 20-150 Hz range with time-varying amplitude
+ */
 function addEMG(x, scale, rng, N, fs) {
   const nComp = 18;
   const freqs = [], phases = [];
   for (let k = 0; k < nComp; k++) {
-    freqs.push(20 + (100 - 20) * rng());
+    freqs.push(20 + (130 - 20) * rng()); // 20-150 Hz range
     phases.push(2 * Math.PI * rng());
   }
-  const envPh = 2 * Math.PI * rng();
+  // Multiple envelope frequencies for realistic nonstationary behavior
+  const envFreqs = [0.3 + rng() * 0.3, 0.8 + rng() * 0.4, 1.5 + rng() * 0.5];
+  const envPhases = [rng() * 2 * Math.PI, rng() * 2 * Math.PI, rng() * 2 * Math.PI];
+
   for (let i = 0; i < N; i++) {
     const tt = i / fs;
-    const env = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.4 * tt + envPh);
+    // Multi-frequency envelope for more realistic bursts
+    const env = 0.3 + 0.25 * Math.sin(2 * Math.PI * envFreqs[0] * tt + envPhases[0])
+                    + 0.25 * Math.sin(2 * Math.PI * envFreqs[1] * tt + envPhases[1])
+                    + 0.2 * Math.sin(2 * Math.PI * envFreqs[2] * tt + envPhases[2]);
     let s = 0;
     for (let k = 0; k < nComp; k++) {
       s += Math.sin(2 * Math.PI * freqs[k] * tt + phases[k]);
     }
-    s = (s / nComp) * env * scale;
+    s = (s / nComp) * Math.max(0, env) * scale;
     x[i] += s;
   }
+}
+
+/**
+ * Generate colored noise (1/f noise) for baseline wander
+ * More realistic than pure sinusoidal wander
+ */
+function generateColoredNoise(N, fs, rng) {
+  const noise = new Float64Array(N);
+  // Sum of sinusoids at low frequencies with 1/f amplitude scaling
+  const nComponents = 8;
+  for (let k = 0; k < nComponents; k++) {
+    const freq = 0.05 + k * 0.08; // 0.05 to 0.61 Hz
+    const amp = 1.0 / (1 + k * 0.5); // 1/f-like decay
+    const phase = rng() * 2 * Math.PI;
+    for (let i = 0; i < N; i++) {
+      noise[i] += amp * Math.sin(2 * Math.PI * freq * (i / fs) + phase);
+    }
+  }
+  // Normalize
+  const maxNoise = Math.max(...noise.map(Math.abs));
+  if (maxNoise > 0) {
+    for (let i = 0; i < N; i++) noise[i] /= maxNoise;
+  }
+  return noise;
+}
+
+/**
+ * Generate powerline interference with harmonics
+ * Includes fundamental (50/60 Hz) and odd harmonics with amplitude modulation
+ */
+function generatePowerlineNoise(N, fs, rng, fundamental = 60) {
+  const noise = new Float64Array(N);
+  const phase = rng() * 2 * Math.PI;
+  // Amplitude modulation frequency (slow drift in powerline coupling)
+  const amFreq = 0.1 + rng() * 0.2;
+  const amPhase = rng() * 2 * Math.PI;
+
+  for (let i = 0; i < N; i++) {
+    const tt = i / fs;
+    // Amplitude modulation (simulates varying electrode-skin impedance)
+    const am = 0.7 + 0.3 * Math.sin(2 * Math.PI * amFreq * tt + amPhase);
+
+    // Fundamental + odd harmonics (3rd, 5th)
+    let pl = Math.sin(2 * Math.PI * fundamental * tt + phase);
+    pl += 0.15 * Math.sin(2 * Math.PI * 3 * fundamental * tt + phase * 1.5);
+    pl += 0.05 * Math.sin(2 * Math.PI * 5 * fundamental * tt + phase * 2.0);
+
+    noise[i] = pl * am;
+  }
+  return noise;
+}
+
+/**
+ * Generate electrode motion artifacts
+ * Transient shifts with bi-exponential recovery (models physical electrode movement)
+ */
+function generateMotionArtifacts(N, fs, rng, eventRate = 0.3) {
+  const artifacts = new Float64Array(N);
+  const duration = N / fs;
+
+  // Random motion events
+  const nEvents = Math.floor(duration * eventRate * (0.5 + rng()));
+  for (let e = 0; e < nEvents; e++) {
+    const eventTime = rng() * duration;
+    const eventIdx = Math.floor(eventTime * fs);
+    const amplitude = (rng() - 0.5) * 2; // Random direction
+    const tauFast = 0.05 + rng() * 0.1;  // Fast recovery: 50-150ms
+    const tauSlow = 0.3 + rng() * 0.5;   // Slow recovery: 300-800ms
+    const fastWeight = 0.7;
+
+    // Bi-exponential recovery
+    for (let i = eventIdx; i < N; i++) {
+      const dt = (i - eventIdx) / fs;
+      const recovery = fastWeight * Math.exp(-dt / tauFast) + (1 - fastWeight) * Math.exp(-dt / tauSlow);
+      artifacts[i] += amplitude * recovery;
+    }
+  }
+  return artifacts;
+}
+
+/**
+ * Generate impedance drift
+ * Slow drift + occasional step changes (models electrode gel drying, patient movement)
+ */
+function generateImpedanceDrift(N, fs, rng) {
+  const drift = new Float64Array(N);
+  const duration = N / fs;
+
+  // Slow continuous drift
+  const driftFreq = 0.02 + rng() * 0.03; // Very low frequency
+  const driftPhase = rng() * 2 * Math.PI;
+  for (let i = 0; i < N; i++) {
+    drift[i] = Math.sin(2 * Math.PI * driftFreq * (i / fs) + driftPhase);
+  }
+
+  // Occasional step changes (1-3 per recording)
+  const nSteps = 1 + Math.floor(rng() * 2);
+  for (let s = 0; s < nSteps; s++) {
+    const stepTime = 0.2 + rng() * 0.6; // Steps occur in middle 60% of recording
+    const stepIdx = Math.floor(stepTime * duration * fs);
+    const stepAmp = (rng() - 0.5) * 0.5;
+
+    for (let i = stepIdx; i < N; i++) {
+      drift[i] += stepAmp;
+    }
+  }
+
+  return drift;
 }
 
 export function deviceAndArtifactModel(phi, fs, seed, artifactParams = ARTIFACT_PRESETS.typical, deviceParams = DEVICE_PRESETS.diagnostic, enableNoise = true, enableFilters = true) {
@@ -1201,49 +1781,106 @@ export function deviceAndArtifactModel(phi, fs, seed, artifactParams = ARTIFACT_
 
   // Add correlated noise to electrode potentials (preserves Einthoven)
   if (enableNoise) {
-    const phase1 = rng() * Math.PI * 2;
-    const phase2 = rng() * Math.PI * 2;
+    // Generate correlated noise components
+    const baselineNoise = generateColoredNoise(N, fs, rng);
+    const powerlineNoise = generatePowerlineNoise(N, fs, rng, 60);
 
+    // Generate electrode-specific artifacts
+    const motionRA = artifactParams.motion ? generateMotionArtifacts(N, fs, rng, 0.2) : null;
+    const motionLA = artifactParams.motion ? generateMotionArtifacts(N, fs, rng, 0.2) : null;
+    const motionLL = artifactParams.motion ? generateMotionArtifacts(N, fs, rng, 0.15) : null;
+
+    // Impedance drift (correlated across all electrodes with slight variation)
+    const impedanceDrift = artifactParams.impedance ? generateImpedanceDrift(N, fs, rng) : null;
+
+    // Apply artifacts to limb electrodes (correlated for Einthoven preservation)
     for (let i = 0; i < N; i++) {
-      const tt = i / fs;
       // Baseline wander - correlated across limb leads
-      const bw = artifactParams.baseline * Math.sin(2 * Math.PI * 0.25 * tt + phase1);
-      // Power line interference - correlated across all electrodes
-      const pl = artifactParams.powerline * Math.sin(2 * Math.PI * 60 * tt + phase2);
+      const bw = artifactParams.baseline * baselineNoise[i];
 
-      phiMod.phiRA[i] += bw + pl;
-      phiMod.phiLA[i] += bw + pl;
-      phiMod.phiLL[i] += bw + pl;
+      // Power line interference - correlated across all electrodes
+      const pl = artifactParams.powerline * powerlineNoise[i];
+
+      // Motion artifacts - electrode-specific
+      const motRA = motionRA ? artifactParams.motion * motionRA[i] : 0;
+      const motLA = motionLA ? artifactParams.motion * motionLA[i] : 0;
+      const motLL = motionLL ? artifactParams.motion * motionLL[i] : 0;
+
+      // Impedance drift - mostly correlated with slight electrode variation
+      const impDrift = impedanceDrift ? artifactParams.impedance * impedanceDrift[i] : 0;
+
+      phiMod.phiRA[i] += bw + pl + motRA + impDrift;
+      phiMod.phiLA[i] += bw + pl + motLA + impDrift * 0.95;
+      phiMod.phiLL[i] += bw + pl + motLL + impDrift * 0.9;
+    }
+
+    // Precordial leads get some correlated baseline but independent motion
+    if (artifactParams.baseline > 0 || artifactParams.powerline > 0) {
+      for (let i = 0; i < N; i++) {
+        const bw = artifactParams.baseline * baselineNoise[i] * 0.7; // Less baseline in precordial
+        const pl = artifactParams.powerline * powerlineNoise[i];
+        phiMod.phiV1[i] += bw + pl;
+        phiMod.phiV2[i] += bw + pl;
+        phiMod.phiV3[i] += bw + pl;
+        phiMod.phiV4[i] += bw + pl;
+        phiMod.phiV5[i] += bw + pl;
+        phiMod.phiV6[i] += bw + pl;
+        phiMod.phiV3R[i] += bw + pl;
+        phiMod.phiV4R[i] += bw + pl;
+        phiMod.phiV7[i] += bw + pl;
+      }
     }
 
     // EMG noise - independent per electrode but scaled appropriately
-    const emgScale = artifactParams.emg;
-    addEMG(phiMod.phiRA, emgScale * 0.75, rng, N, fs);
-    addEMG(phiMod.phiLA, emgScale * 0.75, rng, N, fs);
-    addEMG(phiMod.phiLL, emgScale * 0.75, rng, N, fs);
-    addEMG(phiMod.phiV1, emgScale * 1.25, rng, N, fs);
-    addEMG(phiMod.phiV2, emgScale * 1.25, rng, N, fs);
-    addEMG(phiMod.phiV3, emgScale * 1.25, rng, N, fs);
-    addEMG(phiMod.phiV4, emgScale, rng, N, fs);
-    addEMG(phiMod.phiV5, emgScale, rng, N, fs);
-    addEMG(phiMod.phiV6, emgScale, rng, N, fs);
-    addEMG(phiMod.phiV3R, emgScale * 1.25, rng, N, fs);
-    addEMG(phiMod.phiV4R, emgScale * 1.25, rng, N, fs);
-    addEMG(phiMod.phiV7, emgScale, rng, N, fs);
+    const emgScale = artifactParams.emg || 0;
+    if (emgScale > 0) {
+      addEMG(phiMod.phiRA, emgScale * 0.75, rng, N, fs);
+      addEMG(phiMod.phiLA, emgScale * 0.75, rng, N, fs);
+      addEMG(phiMod.phiLL, emgScale * 0.75, rng, N, fs);
+      addEMG(phiMod.phiV1, emgScale * 1.25, rng, N, fs);
+      addEMG(phiMod.phiV2, emgScale * 1.25, rng, N, fs);
+      addEMG(phiMod.phiV3, emgScale * 1.25, rng, N, fs);
+      addEMG(phiMod.phiV4, emgScale, rng, N, fs);
+      addEMG(phiMod.phiV5, emgScale, rng, N, fs);
+      addEMG(phiMod.phiV6, emgScale, rng, N, fs);
+      addEMG(phiMod.phiV3R, emgScale * 1.25, rng, N, fs);
+      addEMG(phiMod.phiV4R, emgScale * 1.25, rng, N, fs);
+      addEMG(phiMod.phiV7, emgScale, rng, N, fs);
+    }
   }
 
   // Derive leads from modified electrode potentials
   let leads = deriveLeads(phiMod);
 
-  // Apply device filtering
+  // Apply device filtering and processing
   if (enableFilters) {
     const leadNames = Object.keys(leads);
+    const filterOrder = deviceParams.filterOrder || 2;
+
     for (const name of leadNames) {
-      leads[name] = applyBandpass(leads[name], fs, deviceParams.hpCutoff, deviceParams.lpCutoff);
+      // 1. Bandpass filter (diagnostic or monitor bandwidth)
+      leads[name] = applyBandpass(leads[name], fs, deviceParams.hpCutoff, deviceParams.lpCutoff, filterOrder);
+
+      // 2. Notch filter for powerline interference (if enabled)
+      if (deviceParams.notchFreq) {
+        leads[name] = applyNotchFilter(leads[name], fs, deviceParams.notchFreq, 30);
+      }
+
+      // 3. ADC simulation (quantization + clipping)
+      if (deviceParams.adcBits && deviceParams.adcRangeUV) {
+        leads[name] = simulateADC(leads[name], deviceParams.adcBits, deviceParams.adcRangeUV);
+      }
+
+      // 4. Downsampling (if output rate differs from native)
+      if (deviceParams.outputFs && deviceParams.outputFs < fs) {
+        leads[name] = downsample(leads[name], fs, deviceParams.outputFs);
+      }
     }
   }
 
-  return leads;
+  // Return leads along with effective sampling rate
+  const outputFs = (enableFilters && deviceParams.outputFs) ? deviceParams.outputFs : fs;
+  return { leads, fs: outputFs };
 }
 
 // ============================================================================
@@ -1281,7 +1918,7 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
   const electrodePotentials = leadFieldModel(vcg, electrodeGeometry, { ageY, seed });
 
   // Module 5: Device and Artifact (includes deriving leads)
-  const leads = deviceAndArtifactModel(
+  const deviceResult = deviceAndArtifactModel(
     electrodePotentials,
     fs,
     seed,
@@ -1291,10 +1928,16 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
     enableFilters
   );
 
+  // Handle both old format (just leads) and new format ({leads, fs})
+  const leads = deviceResult.leads || deviceResult;
+  const outputFs = deviceResult.fs || fs;
+  const outputN = Math.floor(duration * outputFs);
+
   // Convert to Int16 (microvolts)
   function toUV(x) {
-    const out = new Int16Array(N);
-    for (let i = 0; i < N; i++) {
+    const len = x.length;
+    const out = new Int16Array(len);
+    for (let i = 0; i < len; i++) {
       let v = Math.round(x[i] * 1000.0);
       v = clamp(v, -32768, 32767);
       out[i] = v;
@@ -1309,11 +1952,11 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
 
   return {
     schema_version: ECG_SCHEMA_VERSION,
-    fs,
+    fs: outputFs,
     duration_s: duration,
     targets: {
       synthetic: true,
-      generator_version: "2.1.0-hrv",
+      generator_version: "2.2.0-device",
       age_years: ageY,
       dx,
       HR_bpm: params.HR,
@@ -1323,6 +1966,7 @@ export function synthECGModular(ageY, dx, seed, options = {}) {
       QTc_ms: Math.round(params.QTc * 1000),
       axes_deg: { P: params.Paxis, QRS: params.QRSaxis, T: params.Taxis },
       hrv: beatSchedule.hrvMetrics,
+      device_mode: deviceParams.description || "unknown",
     },
     leads_uV,
   };

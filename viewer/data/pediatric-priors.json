@@ -1,0 +1,180 @@
+{
+  "version": "1.0.0",
+  "description": "Pediatric ECG normal value priors based on published literature",
+  "references": [
+    "Rijnbeek PR et al. Normal values of the electrocardiogram for ages 16-90 years. J Electrocardiol 2014;47(6):914-921",
+    "Bratincsák A et al. Electrocardiogram standards for children and young adults using Z-scores. Circ Arrhythm Electrophysiol 2020;13(8):e008253",
+    "Davignon A et al. Normal ECG standards for infants and children. Pediatr Cardiol 1979;1:123-131",
+    "Rijnbeek PR et al. New normal limits for the paediatric electrocardiogram. Eur Heart J 2001;22(8):702-711",
+    "Park MK, Guntheroth WG. How to Read Pediatric ECGs, 4th ed. Mosby 2006"
+  ],
+  "age_bins": [
+    {
+      "id": "neonate",
+      "age_range": [0, 0.08],
+      "label": "0-1 month",
+      "HR": { "mean": 145, "sd": 22, "p2": 100, "p50": 145, "p98": 190 },
+      "PR": { "mean": 0.100, "sd": 0.015, "p2": 0.070, "p50": 0.100, "p98": 0.130 },
+      "QRS": { "mean": 0.060, "sd": 0.008, "p2": 0.045, "p50": 0.060, "p98": 0.075 },
+      "QTc": { "mean": 0.400, "sd": 0.025, "p2": 0.350, "p50": 0.400, "p98": 0.450 },
+      "QRSaxis": { "mean": 125, "sd": 35, "p2": 55, "p50": 125, "p98": 180 },
+      "Taxis": { "mean": 85, "sd": 40, "p2": 5, "p50": 85, "p98": 165 },
+      "Paxis": { "mean": 60, "sd": 20, "p2": 20, "p50": 60, "p98": 100 }
+    },
+    {
+      "id": "infant_early",
+      "age_range": [0.08, 0.25],
+      "label": "1-3 months",
+      "HR": { "mean": 150, "sd": 20, "p2": 110, "p50": 150, "p98": 190 },
+      "PR": { "mean": 0.105, "sd": 0.015, "p2": 0.075, "p50": 0.105, "p98": 0.135 },
+      "QRS": { "mean": 0.062, "sd": 0.008, "p2": 0.046, "p50": 0.062, "p98": 0.078 },
+      "QTc": { "mean": 0.400, "sd": 0.025, "p2": 0.350, "p50": 0.400, "p98": 0.450 },
+      "QRSaxis": { "mean": 100, "sd": 35, "p2": 30, "p50": 100, "p98": 170 },
+      "Taxis": { "mean": 70, "sd": 35, "p2": 0, "p50": 70, "p98": 140 },
+      "Paxis": { "mean": 58, "sd": 18, "p2": 22, "p50": 58, "p98": 94 }
+    },
+    {
+      "id": "infant_mid",
+      "age_range": [0.25, 0.5],
+      "label": "3-6 months",
+      "HR": { "mean": 140, "sd": 20, "p2": 100, "p50": 140, "p98": 180 },
+      "PR": { "mean": 0.110, "sd": 0.018, "p2": 0.074, "p50": 0.110, "p98": 0.146 },
+      "QRS": { "mean": 0.065, "sd": 0.008, "p2": 0.049, "p50": 0.065, "p98": 0.081 },
+      "QTc": { "mean": 0.405, "sd": 0.025, "p2": 0.355, "p50": 0.405, "p98": 0.455 },
+      "QRSaxis": { "mean": 85, "sd": 35, "p2": 15, "p50": 85, "p98": 155 },
+      "Taxis": { "mean": 55, "sd": 30, "p2": -5, "p50": 55, "p98": 115 },
+      "Paxis": { "mean": 55, "sd": 18, "p2": 19, "p50": 55, "p98": 91 }
+    },
+    {
+      "id": "infant_late",
+      "age_range": [0.5, 1.0],
+      "label": "6-12 months",
+      "HR": { "mean": 130, "sd": 18, "p2": 94, "p50": 130, "p98": 166 },
+      "PR": { "mean": 0.115, "sd": 0.020, "p2": 0.075, "p50": 0.115, "p98": 0.155 },
+      "QRS": { "mean": 0.068, "sd": 0.008, "p2": 0.052, "p50": 0.068, "p98": 0.084 },
+      "QTc": { "mean": 0.410, "sd": 0.025, "p2": 0.360, "p50": 0.410, "p98": 0.460 },
+      "QRSaxis": { "mean": 75, "sd": 35, "p2": 5, "p50": 75, "p98": 145 },
+      "Taxis": { "mean": 50, "sd": 28, "p2": -6, "p50": 50, "p98": 106 },
+      "Paxis": { "mean": 55, "sd": 18, "p2": 19, "p50": 55, "p98": 91 }
+    },
+    {
+      "id": "toddler",
+      "age_range": [1.0, 3.0],
+      "label": "1-3 years",
+      "HR": { "mean": 115, "sd": 18, "p2": 79, "p50": 115, "p98": 151 },
+      "PR": { "mean": 0.120, "sd": 0.020, "p2": 0.080, "p50": 0.120, "p98": 0.160 },
+      "QRS": { "mean": 0.070, "sd": 0.008, "p2": 0.054, "p50": 0.070, "p98": 0.086 },
+      "QTc": { "mean": 0.410, "sd": 0.025, "p2": 0.360, "p50": 0.410, "p98": 0.460 },
+      "QRSaxis": { "mean": 65, "sd": 30, "p2": 5, "p50": 65, "p98": 125 },
+      "Taxis": { "mean": 45, "sd": 25, "p2": -5, "p50": 45, "p98": 95 },
+      "Paxis": { "mean": 55, "sd": 16, "p2": 23, "p50": 55, "p98": 87 }
+    },
+    {
+      "id": "preschool",
+      "age_range": [3.0, 5.0],
+      "label": "3-5 years",
+      "HR": { "mean": 100, "sd": 15, "p2": 70, "p50": 100, "p98": 130 },
+      "PR": { "mean": 0.130, "sd": 0.022, "p2": 0.086, "p50": 0.130, "p98": 0.174 },
+      "QRS": { "mean": 0.072, "sd": 0.008, "p2": 0.056, "p50": 0.072, "p98": 0.088 },
+      "QTc": { "mean": 0.410, "sd": 0.022, "p2": 0.366, "p50": 0.410, "p98": 0.454 },
+      "QRSaxis": { "mean": 60, "sd": 28, "p2": 4, "p50": 60, "p98": 116 },
+      "Taxis": { "mean": 40, "sd": 22, "p2": -4, "p50": 40, "p98": 84 },
+      "Paxis": { "mean": 52, "sd": 15, "p2": 22, "p50": 52, "p98": 82 }
+    },
+    {
+      "id": "school_early",
+      "age_range": [5.0, 8.0],
+      "label": "5-8 years",
+      "HR": { "mean": 90, "sd": 14, "p2": 62, "p50": 90, "p98": 118 },
+      "PR": { "mean": 0.140, "sd": 0.024, "p2": 0.092, "p50": 0.140, "p98": 0.188 },
+      "QRS": { "mean": 0.076, "sd": 0.010, "p2": 0.056, "p50": 0.076, "p98": 0.096 },
+      "QTc": { "mean": 0.410, "sd": 0.022, "p2": 0.366, "p50": 0.410, "p98": 0.454 },
+      "QRSaxis": { "mean": 58, "sd": 26, "p2": 6, "p50": 58, "p98": 110 },
+      "Taxis": { "mean": 38, "sd": 20, "p2": -2, "p50": 38, "p98": 78 },
+      "Paxis": { "mean": 50, "sd": 15, "p2": 20, "p50": 50, "p98": 80 }
+    },
+    {
+      "id": "school_late",
+      "age_range": [8.0, 12.0],
+      "label": "8-12 years",
+      "HR": { "mean": 80, "sd": 12, "p2": 56, "p50": 80, "p98": 104 },
+      "PR": { "mean": 0.150, "sd": 0.026, "p2": 0.098, "p50": 0.150, "p98": 0.202 },
+      "QRS": { "mean": 0.080, "sd": 0.010, "p2": 0.060, "p50": 0.080, "p98": 0.100 },
+      "QTc": { "mean": 0.410, "sd": 0.020, "p2": 0.370, "p50": 0.410, "p98": 0.450 },
+      "QRSaxis": { "mean": 55, "sd": 25, "p2": 5, "p50": 55, "p98": 105 },
+      "Taxis": { "mean": 38, "sd": 18, "p2": 2, "p50": 38, "p98": 74 },
+      "Paxis": { "mean": 50, "sd": 14, "p2": 22, "p50": 50, "p98": 78 }
+    },
+    {
+      "id": "adolescent",
+      "age_range": [12.0, 16.0],
+      "label": "12-16 years",
+      "HR": { "mean": 75, "sd": 12, "p2": 51, "p50": 75, "p98": 99 },
+      "PR": { "mean": 0.155, "sd": 0.028, "p2": 0.099, "p50": 0.155, "p98": 0.211 },
+      "QRS": { "mean": 0.085, "sd": 0.012, "p2": 0.061, "p50": 0.085, "p98": 0.109 },
+      "QTc": { "mean": 0.410, "sd": 0.020, "p2": 0.370, "p50": 0.410, "p98": 0.450 },
+      "QRSaxis": { "mean": 52, "sd": 24, "p2": 4, "p50": 52, "p98": 100 },
+      "Taxis": { "mean": 38, "sd": 18, "p2": 2, "p50": 38, "p98": 74 },
+      "Paxis": { "mean": 50, "sd": 14, "p2": 22, "p50": 50, "p98": 78 }
+    },
+    {
+      "id": "young_adult",
+      "age_range": [16.0, 40.0],
+      "label": "16-40 years",
+      "HR": { "mean": 70, "sd": 12, "p2": 46, "p50": 70, "p98": 94 },
+      "PR": { "mean": 0.160, "sd": 0.028, "p2": 0.104, "p50": 0.160, "p98": 0.216 },
+      "QRS": { "mean": 0.090, "sd": 0.012, "p2": 0.066, "p50": 0.090, "p98": 0.114 },
+      "QTc": { "mean": 0.410, "sd": 0.020, "p2": 0.370, "p50": 0.410, "p98": 0.450 },
+      "QRSaxis": { "mean": 50, "sd": 30, "p2": -10, "p50": 50, "p98": 110 },
+      "Taxis": { "mean": 40, "sd": 20, "p2": 0, "p50": 40, "p98": 80 },
+      "Paxis": { "mean": 50, "sd": 15, "p2": 20, "p50": 50, "p98": 80 }
+    }
+  ],
+  "morphology_priors": {
+    "comment": "Age-dependent morphology parameters for waveform shape",
+    "rvDom": {
+      "description": "RV dominance (1.0=full RV dom, 0=adult pattern)",
+      "by_age": [
+        { "age": 0, "mean": 1.0, "sd": 0.05 },
+        { "age": 0.5, "mean": 0.9, "sd": 0.08 },
+        { "age": 1, "mean": 0.8, "sd": 0.1 },
+        { "age": 3, "mean": 0.6, "sd": 0.12 },
+        { "age": 8, "mean": 0.4, "sd": 0.12 },
+        { "age": 12, "mean": 0.25, "sd": 0.1 },
+        { "age": 16, "mean": 0.15, "sd": 0.08 }
+      ]
+    },
+    "juvenileT": {
+      "description": "Juvenile T-wave pattern (inverted T in V1-V3)",
+      "by_age": [
+        { "age": 0, "mean": 1.0, "sd": 0.05 },
+        { "age": 1, "mean": 0.9, "sd": 0.08 },
+        { "age": 4, "mean": 0.75, "sd": 0.12 },
+        { "age": 8, "mean": 0.5, "sd": 0.15 },
+        { "age": 12, "mean": 0.25, "sd": 0.12 },
+        { "age": 16, "mean": 0.1, "sd": 0.08 }
+      ]
+    }
+  },
+  "sex_differences": {
+    "comment": "Sex-specific adjustments (multiply by base values)",
+    "male": {
+      "QTc": { "offset": -0.01, "description": "Males have shorter QTc" },
+      "QRS": { "factor": 1.05, "description": "Males have slightly wider QRS" },
+      "voltages": { "factor": 1.1, "description": "Males have higher voltages" }
+    },
+    "female": {
+      "QTc": { "offset": 0.01, "description": "Females have longer QTc" },
+      "QRS": { "factor": 0.95, "description": "Females have slightly narrower QRS" },
+      "voltages": { "factor": 0.9, "description": "Females have lower voltages" }
+    }
+  },
+  "clinical_notes": {
+    "HR": "Heart rate decreases with age. Sinus arrhythmia is normal in children.",
+    "PR": "PR interval increases with age. Short PR may indicate WPW or enhanced AV nodal conduction.",
+    "QRS": "QRS duration increases with age. Prolonged QRS may indicate BBB or intraventricular conduction delay.",
+    "QTc": "QTc is relatively constant across ages (~400-440ms). Bazett correction is standard.",
+    "QRSaxis": "Axis is rightward in neonates (90-180°) due to RV dominance, shifts leftward with age.",
+    "rvDom": "RV dominance is physiologic in neonates, transitions to LV dominance by age 3-6 months."
+  }
+}
