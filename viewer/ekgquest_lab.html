@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EKGQuest Lab — Teaching ECG Laboratory</title>
+<style>
+  :root {
+    --paper: #fff7f7;
+    --trace: #111;
+    --grid1: rgba(205,40,40,0.18);
+    --grid5: rgba(205,40,40,0.44);
+    --text: #141414;
+    --muted: #5c5c5c;
+    --panel: #ffffff;
+    --border: #e2d6d6;
+    --btn: #f7f0f0;
+    --btn2: #efe3e3;
+    --accent: #1b6dff;
+    --ok: #0a7a3b;
+    --warn: #b00020;
+    --chip: #faf6f6;
+    --quiz-bg: #fff8e6;
+    --quiz-border: #f0d88c;
+    --teach-bg: #e8f4ff;
+    --teach-border: #a0c8f0;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: #f3f3f3;
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    margin: 0;
+    padding: 16px;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .header h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .header-badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .badge-synth { background: #ffe4e8; border: 1px solid #f0b6c0; color: #b00020; }
+  .badge-real { background: #e5f7ec; border: 1px solid #b5e1c7; color: #0b6b3b; }
+  .header-info {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Mode Toggle */
+  .mode-toggle {
+    display: flex;
+    gap: 0;
+    background: var(--panel);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .mode-btn {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: transparent;
+    color: var(--muted);
+  }
+  .mode-btn:hover { background: var(--btn); }
+  .mode-btn.active-quiz {
+    background: var(--quiz-bg);
+    color: #8a5a00;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  }
+  .mode-btn.active-teach {
+    background: var(--teach-bg);
+    color: #1b5a8a;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  }
+
+  /* Reveal Button */
+  .reveal-btn {
+    display: none;
+    padding: 10px 28px;
+    background: linear-gradient(135deg, #ff9500, #ff6b00);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 3px 12px rgba(255,107,0,0.3);
+    transition: all 0.15s;
+  }
+  .reveal-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(255,107,0,0.4);
+  }
+  .reveal-btn.visible { display: block; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+    padding: 8px 8px 0 8px;
+    margin-top: 12px;
+  }
+  .tab {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px 8px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab:hover { background: var(--btn); }
+  .tab.active {
+    background: var(--paper);
+    color: var(--text);
+    border-bottom: 2px solid var(--paper);
+  }
+
+  /* Tab Panels */
+  .tab-panels {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    padding: 12px;
+  }
+  .tab-panel {
+    display: none;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .tab-panel.active { display: flex; }
+
+  /* Form Controls */
+  label {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  select, input[type="number"], input[type="file"] {
+    background: #fff;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  input[type="number"] { width: 80px; }
+  input[type="checkbox"] { width: 16px; height: 16px; }
+  button {
+    background: var(--btn);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  button:hover { background: var(--btn2); }
+  button.primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  button.primary:hover { background: #1558cc; }
+
+  .hint { color: var(--muted); font-size: 12px; }
+  .divider { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+
+  /* Measurements Panel */
+  .measurements {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-top: 12px;
+    transition: opacity 0.2s, max-height 0.3s;
+  }
+  .measurements.hidden {
+    opacity: 0.3;
+    max-height: 60px;
+    overflow: hidden;
+    position: relative;
+  }
+  .measurements.hidden::after {
+    content: "Measurements hidden in Quiz mode";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--quiz-bg);
+    border: 1px solid var(--quiz-border);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #8a5a00;
+  }
+  .measurements-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+  }
+  .metric {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+  }
+  .metric-label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .metric-value {
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--text);
+  }
+  .metric-value small { font-weight: 500; color: var(--muted); }
+  .ok { color: var(--ok); }
+  .bad { color: var(--warn); }
+
+  /* ECG Canvas */
+  .canvas-wrap {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--paper);
+    margin-top: 12px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 800px;
+    background: var(--paper);
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: 12px;
+    padding: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+  }
+  .kbd {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+
+  /* Advanced Section */
+  .advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+  .advanced-toggle:hover { background: var(--btn); }
+  .advanced-content {
+    display: none;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+  }
+  .advanced-content.open { display: flex; }
+
+  /* Print Styles */
+  @media print {
+    body { margin: 0; padding: 0; background: white; }
+    .header, .tabs, .tab-panels, .mode-toggle, .reveal-btn, .footer { display: none !important; }
+    .measurements.hidden { opacity: 1; max-height: none; overflow: visible; }
+    .measurements.hidden::after { display: none; }
+    .canvas-wrap { border: none; border-radius: 0; }
+    canvas { height: auto; }
+  }
+
+  @media (max-width: 768px) {
+    .measurements-grid { grid-template-columns: repeat(2, 1fr); }
+    canvas { height: 600px; }
+    .mode-btn { padding: 8px 16px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div style="display:flex; align-items:center; gap:12px">
+    <h1>EKGQuest Lab</h1>
+    <span class="header-badge badge-synth" id="sourceBadge">SYNTHETIC</span>
+  </div>
+
+  <div class="mode-toggle">
+    <button class="mode-btn active-quiz" id="quizModeBtn" onclick="setMode('quiz')">Quiz Mode</button>
+    <button class="mode-btn" id="teachModeBtn" onclick="setMode('teach')">Teach Mode</button>
+  </div>
+
+  <button class="reveal-btn" id="revealBtn" onclick="reveal()">Reveal Answers</button>
+
+  <div class="header-info">
+    <span id="caseInfo">No case loaded</span>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" onclick="showTab('case')">Case</button>
+  <button class="tab" onclick="showTab('view')">View</button>
+  <button class="tab" onclick="showTab('tools')">Tools</button>
+  <button class="tab" onclick="showTab('export')">Export</button>
+</div>
+
+<!-- Tab Panels -->
+<div class="tab-panels">
+  <!-- Case Panel -->
+  <div class="tab-panel active" id="panel-case">
+    <label>Age (years)
+      <input id="ageYears" type="number" min="0" max="25" step="0.1" value="4">
+    </label>
+    <label>Diagnosis
+      <select id="dx">
+        <optgroup label="Normal">
+          <option>Normal sinus</option>
+          <option>Sinus bradycardia</option>
+          <option>Sinus tachycardia</option>
+        </optgroup>
+        <optgroup label="Conduction">
+          <option>RBBB</option>
+          <option>LBBB</option>
+          <option>LAFB</option>
+          <option>1st degree AVB</option>
+          <option>2nd degree AVB (Wenckebach)</option>
+          <option>2nd degree AVB (Mobitz II)</option>
+          <option>3rd degree AVB</option>
+        </optgroup>
+        <optgroup label="Pre-excitation">
+          <option>WPW</option>
+        </optgroup>
+        <optgroup label="Hypertrophy">
+          <option>LVH</option>
+          <option>RVH</option>
+        </optgroup>
+        <optgroup label="Tachyarrhythmias">
+          <option>SVT (narrow)</option>
+          <option>Atrial flutter (2:1)</option>
+        </optgroup>
+        <optgroup label="Repolarization">
+          <option>Long QT</option>
+          <option>Pericarditis</option>
+        </optgroup>
+        <optgroup label="Ectopy">
+          <option>PACs</option>
+          <option>PVCs</option>
+        </optgroup>
+      </select>
+    </label>
+    <label>Seed
+      <input id="seed" type="number" min="1" step="1" value="7">
+    </label>
+    <button class="primary" id="genBtn" onclick="generate()">Generate</button>
+    <button id="randBtn" onclick="randomize()">Random</button>
+    <div class="divider"></div>
+    <label>Load file
+      <input type="file" id="fileInput" accept=".json">
+    </label>
+  </div>
+
+  <!-- View Panel -->
+  <div class="tab-panel" id="panel-view">
+    <label>Layout
+      <select id="layout" onchange="redraw()">
+        <option value="stacked" selected>Stacked (15 leads)</option>
+        <option value="print12">12-lead print + rhythm</option>
+      </select>
+    </label>
+    <label>Speed
+      <select id="speed" onchange="redraw()">
+        <option value="25" selected>25 mm/s</option>
+        <option value="50">50 mm/s</option>
+      </select>
+    </label>
+    <label>Gain
+      <select id="gain" onchange="redraw()">
+        <option value="5">5 mm/mV</option>
+        <option value="10" selected>10 mm/mV</option>
+        <option value="20">20 mm/mV</option>
+      </select>
+    </label>
+    <label>Scale
+      <select id="pxmm" onchange="redraw()">
+        <option value="4" selected>Fit</option>
+        <option value="6">Medium</option>
+        <option value="8">Large</option>
+      </select>
+    </label>
+    <div class="divider"></div>
+    <span class="advanced-toggle" onclick="toggleAdvanced()">
+      <span id="advIcon">+</span> Advanced
+    </span>
+    <div class="advanced-content" id="advancedContent">
+      <label><input id="noise" type="checkbox" checked onchange="generate()"> Noise</label>
+      <label><input id="filters" type="checkbox" checked onchange="generate()"> Diagnostic filter</label>
+      <label><input id="fid" type="checkbox" checked onchange="redraw()"> Fiducials</label>
+      <label><input id="snap" type="checkbox" checked> Snap calipers</label>
+      <label><input id="median" type="checkbox" checked onchange="redraw()"> Median-beat</label>
+    </div>
+  </div>
+
+  <!-- Tools Panel -->
+  <div class="tab-panel" id="panel-tools">
+    <button id="calBtn" onclick="toggleCalipers()">Calipers: OFF</button>
+    <button onclick="clearCalipers()">Clear Calipers</button>
+    <div class="divider"></div>
+    <span class="hint">
+      <span class="kbd">C</span> Toggle calipers &nbsp;
+      <span class="kbd">Drag</span> Pan &nbsp;
+      <span class="kbd">Wheel</span> Zoom
+    </span>
+  </div>
+
+  <!-- Export Panel -->
+  <div class="tab-panel" id="panel-export">
+    <button onclick="printWorksheet()">Print Worksheet</button>
+    <button onclick="printAnswerKey()">Print Answer Key</button>
+    <div class="divider"></div>
+    <button onclick="exportPNG()">Export PNG</button>
+    <button onclick="exportJSON()">Export JSON</button>
+    <button onclick="exportCSV()">Export CSV</button>
+  </div>
+</div>
+
+<!-- Measurements -->
+<div class="measurements hidden" id="measurements">
+  <div class="measurements-grid">
+    <div class="metric"><div class="metric-label">Heart Rate</div><div class="metric-value" id="m_hr">—</div></div>
+    <div class="metric"><div class="metric-label">PR Interval</div><div class="metric-value" id="m_pr">—</div></div>
+    <div class="metric"><div class="metric-label">QRS Duration</div><div class="metric-value" id="m_qrs">—</div></div>
+    <div class="metric"><div class="metric-label">QT Interval</div><div class="metric-value" id="m_qt">—</div></div>
+    <div class="metric"><div class="metric-label">QTc (Bazett)</div><div class="metric-value" id="m_qtc">—</div></div>
+    <div class="metric"><div class="metric-label">Axes (P/QRS/T)</div><div class="metric-value" id="m_axes">—</div></div>
+    <div class="metric" id="diagnosisMetric"><div class="metric-label">Diagnosis</div><div class="metric-value" id="m_dx">—</div></div>
+    <div class="metric"><div class="metric-label">Age</div><div class="metric-value" id="m_age">—</div></div>
+  </div>
+</div>
+
+<!-- ECG Canvas -->
+<div class="canvas-wrap">
+  <canvas id="c"></canvas>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  EKGQuest Lab — Educational ECG synthesis and teaching tool.
+  Synthetic data for learning only; not for clinical use.
+</div>
+
+<script type="module">
+import {
+  ECG_SCHEMA_VERSION,
+  clamp, lerp, medianOfSmallArray, medianWindow, mean,
+  fmtMs, fmtBpm, fmtDeg,
+  physicsChecks, detectRPeaks,
+  buildMedianBeat, fiducialsFromMedian, buildFullFiducialsFromMedian,
+  computeAxesFromMedian, computeGlobalMeasurements
+} from "./js/ecg-core.js";
+
+// Will be imported dynamically when synthesizer is used
+let synthModule = null;
+
+// ============================================================================
+// STATE
+// ============================================================================
+
+let currentMode = 'quiz';  // 'quiz' or 'teach'
+let ecgData = null;
+let measurements = null;
+let calipersActive = false;
+let caliperPoints = [];
+let panOffset = 0;
+let zoomLevel = 1;
+
+// ============================================================================
+// MODE MANAGEMENT
+// ============================================================================
+
+window.setMode = function(mode) {
+  currentMode = mode;
+
+  // Update buttons
+  document.getElementById('quizModeBtn').className = mode === 'quiz' ? 'mode-btn active-quiz' : 'mode-btn';
+  document.getElementById('teachModeBtn').className = mode === 'teach' ? 'mode-btn active-teach' : 'mode-btn';
+
+  // Update reveal button visibility
+  document.getElementById('revealBtn').className = mode === 'quiz' ? 'reveal-btn visible' : 'reveal-btn';
+
+  // Update measurements visibility
+  const measPanel = document.getElementById('measurements');
+  measPanel.className = mode === 'quiz' ? 'measurements hidden' : 'measurements';
+
+  // Update fiducials visibility on canvas
+  if (mode === 'teach') {
+    document.getElementById('fid').checked = true;
+  }
+  redraw();
+};
+
+window.reveal = function() {
+  setMode('teach');
+};
+
+// ============================================================================
+// TAB MANAGEMENT
+// ============================================================================
+
+window.showTab = function(tabId) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.className = ['case', 'view', 'tools', 'export'][i] === tabId ? 'tab active' : 'tab';
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.className = 'tab-panel');
+  document.getElementById('panel-' + tabId).className = 'tab-panel active';
+};
+
+window.toggleAdvanced = function() {
+  const content = document.getElementById('advancedContent');
+  const icon = document.getElementById('advIcon');
+  if (content.classList.contains('open')) {
+    content.classList.remove('open');
+    icon.textContent = '+';
+  } else {
+    content.classList.add('open');
+    icon.textContent = '−';
+  }
+};
+
+// ============================================================================
+// SYNTHESIS
+// ============================================================================
+
+async function ensureSynth() {
+  if (!synthModule) {
+    synthModule = await import("./js/ecg-synth-modules.js");
+  }
+  return synthModule;
+}
+
+window.generate = async function() {
+  const synth = await ensureSynth();
+
+  const age = parseFloat(document.getElementById('ageYears').value) || 4;
+  const dx = document.getElementById('dx').value;
+  const seed = parseInt(document.getElementById('seed').value) || 7;
+  const noiseEnabled = document.getElementById('noise').checked;
+  const filtersEnabled = document.getElementById('filters').checked;
+
+  // Generate ECG using modular synthesis
+  const fs = 1000;
+  const duration = 10;
+  const N = fs * duration;
+
+  const params = synth.generateAgeAppropriateParams(age, dx, seed);
+  const beatSchedule = synth.rhythmModel(params, dx, fs, duration, seed);
+  const { Vx, Vy, Vz } = synth.morphologyModel(beatSchedule, params, dx, fs, N, seed);
+  const leads = synth.leadFieldModel(Vx, Vy, Vz, fs, seed, params);
+
+  // Apply device model
+  let processedLeads = leads;
+  if (noiseEnabled || filtersEnabled) {
+    processedLeads = synth.deviceModel(leads, fs, noiseEnabled, filtersEnabled, seed);
+  }
+
+  // Create ECG data object
+  ecgData = {
+    fs,
+    duration_s: duration,
+    leads_uV: processedLeads,
+    targets: {
+      synthetic: true,
+      generator_version: "2.0-lab",
+      age_years: age,
+      dx: dx,
+      HR_bpm: params.HR,
+      PR_ms: Math.round(params.PR * 1000),
+      QRS_ms: Math.round(params.QRS * 1000),
+      QTc_ms: Math.round(params.QTc * 1000),
+      seed: seed
+    }
+  };
+
+  updateAfterLoad();
+};
+
+window.randomize = function() {
+  document.getElementById('seed').value = Math.floor(Math.random() * 99999) + 1;
+  generate();
+};
+
+// ============================================================================
+// FILE LOADING
+// ============================================================================
+
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    ecgData = JSON.parse(text);
+    updateAfterLoad();
+  } catch (err) {
+    alert('Failed to load file: ' + err.message);
+  }
+});
+
+// ============================================================================
+// UPDATE AFTER LOAD
+// ============================================================================
+
+function updateAfterLoad() {
+  if (!ecgData) return;
+
+  // Update badge
+  const badge = document.getElementById('sourceBadge');
+  if (ecgData.targets?.synthetic) {
+    badge.textContent = 'SYNTHETIC';
+    badge.className = 'header-badge badge-synth';
+  } else {
+    badge.textContent = 'REAL';
+    badge.className = 'header-badge badge-real';
+  }
+
+  // Compute measurements
+  computeMeasurements();
+
+  // Update case info
+  const dx = ecgData.targets?.dx || 'Unknown';
+  const age = ecgData.targets?.age_years;
+  document.getElementById('caseInfo').textContent = age != null
+    ? `${dx}, ${age.toFixed(1)} years`
+    : dx;
+
+  // Draw
+  redraw();
+}
+
+// ============================================================================
+// MEASUREMENTS
+// ============================================================================
+
+function computeMeasurements() {
+  if (!ecgData) return;
+
+  const { fs, leads_uV } = ecgData;
+  const leadII = leads_uV.II || leads_uV['II'];
+  if (!leadII) return;
+
+  // Detect R peaks
+  const rPeaks = detectRPeaks(leadII, fs);
+  if (rPeaks.length < 2) return;
+
+  // Compute HR from RR intervals
+  const rr = [];
+  for (let i = 1; i < rPeaks.length; i++) {
+    rr.push((rPeaks[i] - rPeaks[i-1]) / fs);
+  }
+  const meanRR = mean(rr);
+  const hr = 60 / meanRR;
+
+  // Build median beat and compute intervals
+  const medianBeat = buildMedianBeat(leadII, rPeaks, fs);
+  const fids = fiducialsFromMedian(medianBeat, fs);
+  const globalMeas = computeGlobalMeasurements(fids, fs, meanRR);
+
+  measurements = {
+    hr,
+    pr: globalMeas.PR_ms,
+    qrs: globalMeas.QRS_ms,
+    qt: globalMeas.QT_ms,
+    qtcBazett: globalMeas.QTc_Bazett_ms,
+    qtcFrid: globalMeas.QTc_Fridericia_ms,
+    axes: computeAxesFromMedian ? computeAxesFromMedian(leads_uV, rPeaks, fs) : null,
+    rPeaks,
+    fids,
+    medianBeat
+  };
+
+  // Update display
+  const age = ecgData.targets?.age_years || 8;
+  document.getElementById('m_hr').innerHTML = fmtMeasure(hr, 'bpm', 'HR', age);
+  document.getElementById('m_pr').innerHTML = fmtMeasure(measurements.pr, 'ms', 'PR', age);
+  document.getElementById('m_qrs').innerHTML = fmtMeasure(measurements.qrs, 'ms', 'QRS', age);
+  document.getElementById('m_qt').textContent = measurements.qt ? `${Math.round(measurements.qt)} ms` : '—';
+  document.getElementById('m_qtc').innerHTML = fmtMeasure(measurements.qtcBazett, 'ms', 'QTc', age);
+
+  if (measurements.axes) {
+    const { P, QRS, T } = measurements.axes;
+    document.getElementById('m_axes').textContent = `${Math.round(P)}° / ${Math.round(QRS)}° / ${Math.round(T)}°`;
+  }
+
+  document.getElementById('m_dx').textContent = ecgData.targets?.dx || '—';
+  document.getElementById('m_age').textContent = ecgData.targets?.age_years != null
+    ? `${ecgData.targets.age_years.toFixed(1)} years`
+    : '—';
+}
+
+function fmtMeasure(value, unit, param, age) {
+  if (value == null) return '—';
+  const valStr = unit === 'bpm' ? `${Math.round(value)} bpm` : `${Math.round(value)} ms`;
+  // Could add age-appropriate normal range checking here
+  return valStr;
+}
+
+// ============================================================================
+// DRAWING
+// ============================================================================
+
+function redraw() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  // Set canvas size
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  // Clear
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--paper');
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  if (!ecgData) {
+    ctx.fillStyle = '#888';
+    ctx.font = '16px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Generate or load an ECG to begin', rect.width / 2, rect.height / 2);
+    return;
+  }
+
+  const layout = document.getElementById('layout').value;
+  const speed = parseInt(document.getElementById('speed').value);
+  const gain = parseInt(document.getElementById('gain').value);
+  const pxmm = parseInt(document.getElementById('pxmm').value);
+  const showFid = document.getElementById('fid').checked && currentMode === 'teach';
+
+  const { fs, leads_uV } = ecgData;
+  const mmPerSec = speed;
+  const mmPerMV = gain;
+  const pxPerMm = pxmm;
+
+  // Draw based on layout
+  if (layout === 'stacked') {
+    drawStackedLayout(ctx, rect.width, rect.height, leads_uV, fs, pxPerMm, mmPerSec, mmPerMV, showFid);
+  } else {
+    draw12LeadLayout(ctx, rect.width, rect.height, leads_uV, fs, pxPerMm, mmPerSec, mmPerMV, showFid);
+  }
+}
+
+function drawStackedLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, showFid) {
+  const leadOrder = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+  const available = leadOrder.filter(l => leads[l]);
+  const rowCount = available.length;
+  const rowH = h / rowCount;
+
+  // Draw grid
+  drawGrid(ctx, w, h, pxPerMm);
+
+  // Draw each lead
+  available.forEach((lead, i) => {
+    const y0 = (i + 0.5) * rowH;
+    const signal = leads[lead];
+
+    // Lead label
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 12px system-ui';
+    ctx.textAlign = 'left';
+    ctx.fillText(lead, 8, y0 - rowH/2 + 14);
+
+    // Draw trace
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    const pxPerSample = (pxPerMm * mmPerSec) / fs;
+    const uvPerPx = 1000 / (pxPerMm * mmPerMV);
+
+    for (let j = 0; j < signal.length; j++) {
+      const x = 40 + j * pxPerSample + panOffset;
+      if (x < 0 || x > w) continue;
+      const yVal = y0 - signal[j] / uvPerPx;
+      if (j === 0) ctx.moveTo(x, yVal);
+      else ctx.lineTo(x, yVal);
+    }
+    ctx.stroke();
+  });
+
+  // Draw fiducials if enabled
+  if (showFid && measurements?.fids && measurements?.rPeaks) {
+    drawFiducials(ctx, leads.II || leads['II'], fs, measurements, h / 2, pxPerMm * mmPerSec / fs);
+  }
+
+  // Draw calipers
+  if (caliperPoints.length >= 2) {
+    drawCalipers(ctx, fs, pxPerMm * mmPerSec / fs);
+  }
+}
+
+function draw12LeadLayout(ctx, w, h, leads, fs, pxPerMm, mmPerSec, mmPerMV, showFid) {
+  // Simplified 12-lead layout (3x4 grid + rhythm strip)
+  drawGrid(ctx, w, h, pxPerMm);
+
+  const leadGroups = [
+    ['I', 'aVR', 'V1', 'V4'],
+    ['II', 'aVL', 'V2', 'V5'],
+    ['III', 'aVF', 'V3', 'V6']
+  ];
+
+  const colW = w / 4;
+  const rowH = (h - 100) / 3;
+  const rhythmH = 80;
+
+  leadGroups.forEach((row, ri) => {
+    row.forEach((lead, ci) => {
+      if (!leads[lead]) return;
+      const x0 = ci * colW + 10;
+      const y0 = ri * rowH + rowH / 2;
+
+      // Label
+      ctx.fillStyle = '#333';
+      ctx.font = 'bold 11px system-ui';
+      ctx.fillText(lead, x0, ri * rowH + 14);
+
+      // Trace (2.5 seconds per column)
+      const signal = leads[lead];
+      const samplesPerCol = Math.floor(2.5 * fs);
+      const startSample = ci * samplesPerCol;
+      const endSample = Math.min(startSample + samplesPerCol, signal.length);
+
+      const pxPerSample = (colW - 20) / samplesPerCol;
+      const uvPerPx = 1000 / (pxPerMm * mmPerMV);
+
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+
+      for (let j = startSample; j < endSample; j++) {
+        const x = x0 + (j - startSample) * pxPerSample;
+        const yVal = y0 - signal[j] / uvPerPx;
+        if (j === startSample) ctx.moveTo(x, yVal);
+        else ctx.lineTo(x, yVal);
+      }
+      ctx.stroke();
+    });
+  });
+
+  // Rhythm strip (Lead II, full duration)
+  const rhythmY = h - rhythmH / 2 - 10;
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 11px system-ui';
+  ctx.fillText('II (rhythm)', 10, h - rhythmH);
+
+  if (leads.II) {
+    const signal = leads.II;
+    const pxPerSample = (w - 40) / signal.length;
+    const uvPerPx = 1000 / (pxPerMm * mmPerMV);
+
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    for (let j = 0; j < signal.length; j++) {
+      const x = 20 + j * pxPerSample;
+      const yVal = rhythmY - signal[j] / uvPerPx;
+      if (j === 0) ctx.moveTo(x, yVal);
+      else ctx.lineTo(x, yVal);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawGrid(ctx, w, h, pxPerMm) {
+  // 1mm grid
+  ctx.strokeStyle = 'rgba(205,40,40,0.18)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < w; x += pxPerMm) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+  for (let y = 0; y < h; y += pxPerMm) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  // 5mm grid
+  ctx.strokeStyle = 'rgba(205,40,40,0.44)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < w; x += pxPerMm * 5) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+  for (let y = 0; y < h; y += pxPerMm * 5) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+}
+
+function drawFiducials(ctx, signal, fs, meas, y0, pxPerSample) {
+  if (!meas.rPeaks) return;
+
+  ctx.fillStyle = 'rgba(27,109,255,0.15)';
+  ctx.strokeStyle = 'rgba(27,109,255,0.6)';
+
+  meas.rPeaks.forEach(rIdx => {
+    const x = 40 + rIdx * pxPerSample + panOffset;
+    if (x < 0 || x > 2000) return;
+
+    // R peak marker
+    ctx.beginPath();
+    ctx.arc(x, y0 - 20, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+}
+
+function drawCalipers(ctx, fs, pxPerSample) {
+  if (caliperPoints.length < 2) return;
+
+  const p1 = caliperPoints[0];
+  const p2 = caliperPoints[1];
+
+  // Draw lines
+  ctx.strokeStyle = '#1b6dff';
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y - 30);
+  ctx.lineTo(p1.x, p1.y + 30);
+  ctx.moveTo(p2.x, p2.y - 30);
+  ctx.lineTo(p2.x, p2.y + 30);
+  ctx.moveTo(p1.x, (p1.y + p2.y) / 2);
+  ctx.lineTo(p2.x, (p1.y + p2.y) / 2);
+  ctx.stroke();
+
+  // Measurement label
+  const dx = Math.abs(p2.x - p1.x);
+  const dt = dx / pxPerSample / fs * 1000;
+  const midX = (p1.x + p2.x) / 2;
+  const midY = Math.min(p1.y, p2.y) - 40;
+
+  ctx.fillStyle = '#1b6dff';
+  ctx.font = 'bold 14px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${Math.round(dt)} ms`, midX, midY);
+}
+
+// ============================================================================
+// CALIPERS
+// ============================================================================
+
+window.toggleCalipers = function() {
+  calipersActive = !calipersActive;
+  document.getElementById('calBtn').textContent = calipersActive ? 'Calipers: ON' : 'Calipers: OFF';
+  document.getElementById('c').style.cursor = calipersActive ? 'crosshair' : 'default';
+};
+
+window.clearCalipers = function() {
+  caliperPoints = [];
+  redraw();
+};
+
+document.getElementById('c').addEventListener('click', (e) => {
+  if (!calipersActive) return;
+
+  const rect = e.target.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  if (caliperPoints.length >= 2) {
+    caliperPoints = [];
+  }
+  caliperPoints.push({ x, y });
+
+  redraw();
+});
+
+// Keyboard shortcut for calipers
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'c' || e.key === 'C') {
+    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+      toggleCalipers();
+    }
+  }
+});
+
+// ============================================================================
+// EXPORT FUNCTIONS
+// ============================================================================
+
+window.printWorksheet = function() {
+  setMode('quiz');
+  setTimeout(() => window.print(), 100);
+};
+
+window.printAnswerKey = function() {
+  setMode('teach');
+  setTimeout(() => window.print(), 100);
+};
+
+window.exportPNG = function() {
+  const canvas = document.getElementById('c');
+  const link = document.createElement('a');
+  link.download = 'ecg-export.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+};
+
+window.exportJSON = function() {
+  if (!ecgData) return alert('No ECG loaded');
+  const blob = new Blob([JSON.stringify(ecgData, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.download = 'ecg-export.json';
+  link.href = URL.createObjectURL(blob);
+  link.click();
+};
+
+window.exportCSV = function() {
+  if (!ecgData) return alert('No ECG loaded');
+
+  const leads = ecgData.leads_uV;
+  const leadNames = Object.keys(leads);
+  const len = leads[leadNames[0]].length;
+
+  let csv = 'sample,' + leadNames.join(',') + '\n';
+  for (let i = 0; i < len; i++) {
+    csv += i + ',' + leadNames.map(l => leads[l][i]).join(',') + '\n';
+  }
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const link = document.createElement('a');
+  link.download = 'ecg-export.csv';
+  link.href = URL.createObjectURL(blob);
+  link.click();
+};
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+window.redraw = redraw;
+
+// Resize handling
+window.addEventListener('resize', redraw);
+
+// Initial draw
+redraw();
+
+// Generate initial case
+generate();
+
+</script>
+</body>
+</html>
