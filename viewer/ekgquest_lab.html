@@ -552,6 +552,25 @@
       min-height: 48px;
     }
   }
+
+  /* Drag and drop overlay */
+  body.drag-active::after {
+    content: 'Drop ECG image here';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 100, 200, 0.9);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    font-weight: bold;
+    z-index: 10000;
+    pointer-events: none;
+    border: 4px dashed white;
+    margin: 20px;
+    border-radius: 20px;
+  }
 </style>
 </head>
 <body>
@@ -1359,6 +1378,163 @@ document.addEventListener('paste', async (e) => {
     }
   }
 });
+
+// Drag and drop from anywhere (including directly from web pages)
+const dropZone = document.body;
+let dragCounter = 0;
+
+dropZone.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  dragCounter++;
+  document.body.classList.add('drag-active');
+});
+
+dropZone.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter === 0) {
+    document.body.classList.remove('drag-active');
+  }
+});
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+dropZone.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  document.body.classList.remove('drag-active');
+
+  // Check for files first
+  if (e.dataTransfer.files.length > 0) {
+    const file = e.dataTransfer.files[0];
+    if (file.type.startsWith('image/')) {
+      loadDroppedImage(file);
+      return;
+    }
+  }
+
+  // Check for image URL (dragged from webpage)
+  const html = e.dataTransfer.getData('text/html');
+  const text = e.dataTransfer.getData('text/plain');
+
+  // Try to extract image URL from HTML
+  if (html) {
+    const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+    if (match) {
+      loadImageFromURL(match[1]);
+      return;
+    }
+  }
+
+  // Try plain text as URL
+  if (text && (text.startsWith('http') || text.startsWith('data:image'))) {
+    loadImageFromURL(text);
+    return;
+  }
+
+  showStatus('Drop an ECG image or image URL', 'info');
+});
+
+function loadDroppedImage(file) {
+  const img = new Image();
+  img.onload = function() {
+    uploadedImage = img;
+    uploadedImageName = file.name;
+    imageMode = true;
+    imageCalibration = null;
+
+    const detected = detectGridSpacing(img);
+    if (detected && detected.confidence > 0.6) {
+      imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-drop' };
+      showStatus('ECG dropped with auto-calibration!', 'success');
+    } else {
+      showStatus('ECG dropped - click Calibrate for measurements', 'info');
+    }
+
+    document.getElementById('calibrationControls').style.display = 'block';
+    document.getElementById('caseInfo').textContent = file.name;
+    redraw();
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+async function loadImageFromURL(url) {
+  showStatus('Loading image from URL...', 'info', 0);
+
+  try {
+    // Handle data URLs directly
+    if (url.startsWith('data:image')) {
+      const img = new Image();
+      img.onload = function() {
+        uploadedImage = img;
+        uploadedImageName = 'web-image.png';
+        imageMode = true;
+        imageCalibration = null;
+
+        const detected = detectGridSpacing(img);
+        if (detected && detected.confidence > 0.6) {
+          imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-url' };
+          showStatus('ECG loaded with auto-calibration!', 'success');
+        } else {
+          showStatus('ECG loaded - click Calibrate for measurements', 'info');
+        }
+
+        document.getElementById('calibrationControls').style.display = 'block';
+        document.getElementById('caseInfo').textContent = 'Web image';
+        redraw();
+      };
+      img.onerror = () => showStatus('Failed to load image', 'error');
+      img.src = url;
+      return;
+    }
+
+    // For external URLs, try to fetch (may fail due to CORS)
+    // First try direct load
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = function() {
+      uploadedImage = img;
+      uploadedImageName = url.split('/').pop() || 'web-image.png';
+      imageMode = true;
+      imageCalibration = null;
+
+      const detected = detectGridSpacing(img);
+      if (detected && detected.confidence > 0.6) {
+        imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-url' };
+        showStatus('ECG loaded with auto-calibration!', 'success');
+      } else {
+        showStatus('ECG loaded - click Calibrate for measurements', 'info');
+      }
+
+      document.getElementById('calibrationControls').style.display = 'block';
+      document.getElementById('caseInfo').textContent = uploadedImageName;
+      redraw();
+    };
+
+    img.onerror = () => {
+      // CORS blocked - try proxy or show message
+      showStatus('Could not load image (CORS). Try: copy image, then Cmd+V', 'warning');
+    };
+
+    img.src = url;
+
+  } catch (err) {
+    showStatus('Failed to load image: ' + err.message, 'error');
+  }
+}
+
+// Also handle pasting URLs
+document.addEventListener('paste', (e) => {
+  const text = e.clipboardData?.getData('text/plain');
+  if (text && text.match(/^https?:\/\/.*\.(png|jpg|jpeg|gif|webp)/i)) {
+    e.preventDefault();
+    loadImageFromURL(text);
+  }
+}, true);
 
 window.startCalibration = function() {
   if (!imageMode || !uploadedImage) {
