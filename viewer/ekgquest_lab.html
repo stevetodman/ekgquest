@@ -678,7 +678,10 @@
     <div class="divider"></div>
     <div class="upload-section">
       <strong style="font-size:12px;color:var(--muted)">Import Real ECG</strong>
-      <button id="clipboardBtn" onclick="loadFromClipboard()" title="Copy any ECG image, then click this">
+      <div class="import-hint" style="font-size:10px;color:#888;margin-bottom:4px">
+        ⌘V paste • ⌘O open • Drag image anywhere • Drop URL
+      </div>
+      <button id="clipboardBtn" onclick="loadFromClipboard()" title="Copy any ECG image, then click this (⌘V)">
         📋 Paste from Clipboard
       </button>
       <label>Upload PDF or Image
@@ -769,6 +772,15 @@
       <span class="kbd">Del</span> Delete &nbsp;
       <span class="kbd">Esc</span> Cancel
     </span>
+    <div class="divider"></div>
+    <strong style="font-size:12px;color:var(--muted)">One-Click Import</strong>
+    <p style="font-size:11px;color:var(--muted);margin:4px 0">Drag this to your bookmarks bar:</p>
+    <a id="bookmarklet" href="javascript:(function(){var imgs=document.querySelectorAll('img');if(imgs.length===0){alert('No images found');return;}var largest=null,maxArea=0;imgs.forEach(function(img){var area=img.naturalWidth*img.naturalHeight;if(area>maxArea){maxArea=area;largest=img;}});if(largest&&maxArea>10000){window.open('http://localhost:8000/viewer/ekgquest_lab.html?img='+encodeURIComponent(largest.src),'_blank');}else{alert('No suitable ECG image found');}})();"
+       style="display:inline-block;background:#1976d2;color:white;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;cursor:move"
+       onclick="event.preventDefault();alert('Drag this to your bookmarks bar, then click it on any page with an ECG image!')">
+      📋 ECG → EKGQuest
+    </a>
+    <p style="font-size:10px;color:var(--muted);margin:4px 0">Click on any page with an ECG image to send it here.</p>
   </div>
 
   <!-- Compare Panel -->
@@ -1339,6 +1351,38 @@ document.addEventListener('paste', async (e) => {
       img.src = URL.createObjectURL(blob);
       return;
     }
+  }
+});
+
+// Keyboard shortcuts for frictionless import
+document.addEventListener('keydown', (e) => {
+  // Cmd+O or Ctrl+O: Open file dialog
+  if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
+    e.preventDefault();
+    document.getElementById('imageInput').click();
+    return;
+  }
+
+  // Cmd+Shift+V: Force paste from clipboard (even if focused elsewhere)
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'v') {
+    e.preventDefault();
+    loadFromClipboard();
+    return;
+  }
+
+  // Escape: Cancel current import/calibration
+  if (e.key === 'Escape' && (calibrationMode || imageMode)) {
+    e.preventDefault();
+    if (calibrationMode) {
+      window.cancelCalibration();
+    } else if (imageMode) {
+      // Reset to synthetic mode
+      imageMode = false;
+      uploadedImage = null;
+      document.getElementById('calibrationControls').style.display = 'none';
+      generate();
+    }
+    return;
   }
 });
 
@@ -2087,6 +2131,23 @@ function extractWaveformFromImage(img, calibration) {
   const paperSpeed = parseInt(document.getElementById('importSpeed').value); // mm/s
   const gain = parseInt(document.getElementById('importGain').value); // mm/mV
 
+  // Detect and mask watermarks
+  const watermarkInfo = detectWatermarks(data, width, height);
+  const watermarkMask = watermarkInfo.mask;
+
+  // Detect image inversion (dark background)
+  const avgBrightness = calculateAverageBrightness(data, width, height);
+  const isInverted = avgBrightness < 128;
+
+  // If inverted, invert the image for processing
+  if (isInverted) {
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = 255 - data[i];
+      data[i + 1] = 255 - data[i + 1];
+      data[i + 2] = 255 - data[i + 2];
+    }
+  }
+
   // Detect lead regions (horizontal bands where traces are)
   const leadRegions = detectLeadRegions(data, width, height);
 
@@ -2100,7 +2161,7 @@ function extractWaveformFromImage(img, calibration) {
 
   // Process each lead region
   for (const region of leadRegions) {
-    const trace = extractTraceFromRegion(data, width, height, region.y1, region.y2, region.gridColor, region.traceColor);
+    const trace = extractTraceFromRegion(data, width, height, region.y1, region.y2, region.gridColor, region.traceColor, watermarkMask);
 
     if (trace.length < 10) continue;
 
@@ -2141,6 +2202,188 @@ function extractWaveformFromImage(img, calibration) {
     fs,
     duration_s
   };
+}
+
+// Calculate average brightness of image
+function calculateAverageBrightness(data, width, height) {
+  let sum = 0;
+  const step = 10; // Sample every 10th pixel for speed
+  let count = 0;
+  for (let i = 0; i < width * height; i += step) {
+    const idx = i * 4;
+    sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+    count++;
+  }
+  return sum / count;
+}
+
+// Detect watermark regions (light gray text/patterns)
+function detectWatermarks(data, width, height) {
+  // Watermarks are typically:
+  // 1. Consistent gray level (not grid color, not trace color)
+  // 2. Lighter than trace but darker than background
+  // 3. Often horizontal text patterns
+
+  // Build histogram of gray levels
+  const histogram = new Array(256).fill(0);
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    const gray = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+    histogram[gray]++;
+  }
+
+  // Find background peak (usually 200-255)
+  let bgPeak = 255, bgCount = 0;
+  for (let i = 200; i < 256; i++) {
+    if (histogram[i] > bgCount) {
+      bgCount = histogram[i];
+      bgPeak = i;
+    }
+  }
+
+  // Watermarks are typically 120-180 gray range (between trace and background)
+  // Find any secondary peak in this range
+  let wmPeak = -1, wmCount = 0;
+  for (let i = 120; i < 190; i++) {
+    if (histogram[i] > wmCount && histogram[i] > (width * height) * 0.001) {
+      wmCount = histogram[i];
+      wmPeak = i;
+    }
+  }
+
+  // Create watermark mask if we found a watermark gray level
+  const watermarkMask = new Uint8Array(width * height);
+  if (wmPeak > 0) {
+    const tolerance = 15;
+    for (let i = 0; i < width * height; i++) {
+      const idx = i * 4;
+      const gray = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+      // Mark pixel as watermark if it's in the watermark gray range
+      // AND it's relatively uniform color (watermarks are usually gray, not colored)
+      const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+      const isGray = Math.abs(r - g) < 30 && Math.abs(g - b) < 30;
+      if (Math.abs(gray - wmPeak) < tolerance && isGray) {
+        watermarkMask[i] = 1;
+      }
+    }
+  }
+
+  return { mask: watermarkMask, wmGray: wmPeak };
+}
+
+// Image preprocessing for better trace extraction
+function preprocessImage(imageData) {
+  const data = imageData.data;
+  const width = imageData.width;
+  const height = imageData.height;
+
+  // Step 1: Convert to grayscale and enhance contrast
+  const gray = new Float32Array(width * height);
+  let minVal = 255, maxVal = 0;
+
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    const val = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+    gray[i] = val;
+    if (val < minVal) minVal = val;
+    if (val > maxVal) maxVal = val;
+  }
+
+  // Step 2: Contrast stretch
+  const range = maxVal - minVal || 1;
+  for (let i = 0; i < gray.length; i++) {
+    gray[i] = ((gray[i] - minVal) / range) * 255;
+  }
+
+  // Step 3: Apply adaptive thresholding for trace detection
+  const windowSize = Math.max(15, Math.floor(width / 50));
+  const enhanced = new Uint8ClampedArray(data.length);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+
+      // Calculate local mean
+      let sum = 0, count = 0;
+      for (let dy = -windowSize; dy <= windowSize; dy += 2) {
+        for (let dx = -windowSize; dx <= windowSize; dx += 2) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            sum += gray[ny * width + nx];
+            count++;
+          }
+        }
+      }
+      const localMean = sum / count;
+
+      // Threshold relative to local mean
+      const idx = i * 4;
+      const val = gray[i];
+      const threshold = localMean - 20; // Pixels darker than local mean - offset
+
+      if (val < threshold) {
+        // Dark pixel - potential trace
+        enhanced[idx] = data[idx];
+        enhanced[idx + 1] = data[idx + 1];
+        enhanced[idx + 2] = data[idx + 2];
+        enhanced[idx + 3] = 255;
+      } else {
+        // Light pixel - background
+        enhanced[idx] = 255;
+        enhanced[idx + 1] = 255;
+        enhanced[idx + 2] = 255;
+        enhanced[idx + 3] = 255;
+      }
+    }
+  }
+
+  return new ImageData(enhanced, width, height);
+}
+
+// Sobel edge detection for trace boundaries
+function applySobelY(gray, width, height) {
+  const edges = new Float32Array(width * height);
+  const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      let sum = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          sum += gray[(y + dy) * width + (x + dx)] * sobelY[dy + 1][dx + 1];
+        }
+      }
+      edges[y * width + x] = Math.abs(sum);
+    }
+  }
+
+  return edges;
+}
+
+// Find baseline (isoelectric line) for better voltage reference
+function findBaseline(trace, regionHeight) {
+  // Use histogram of y-values to find most common level
+  const histogram = new Array(regionHeight).fill(0);
+
+  for (const pt of trace) {
+    if (pt.y !== null) {
+      const bin = Math.floor(pt.y) % regionHeight;
+      if (bin >= 0 && bin < regionHeight) {
+        histogram[bin]++;
+      }
+    }
+  }
+
+  // Find the peak (most common y-value = baseline)
+  let maxCount = 0, baselineY = regionHeight / 2;
+  for (let i = 0; i < histogram.length; i++) {
+    if (histogram[i] > maxCount) {
+      maxCount = histogram[i];
+      baselineY = i;
+    }
+  }
+
+  return baselineY;
 }
 
 // Detect grid color (red, orange, green, blue, or gray)
@@ -2333,9 +2576,10 @@ function detectLeadRegions(data, width, height) {
   return regions;
 }
 
-function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceColor) {
+function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceColor, watermarkMask) {
   gridColor = gridColor || 'red';
   traceColor = traceColor || { type: 'black' };
+  watermarkMask = watermarkMask || null;
 
   const trace = [];
   const regionHeight = y2 - y1;
@@ -2348,8 +2592,14 @@ function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceCol
     let darkestBrightness = 255;
 
     for (let y = y1; y < y2; y++) {
-      const i = (y * width + x) * 4;
+      const pixelIdx = y * width + x;
+      const i = pixelIdx * 4;
       const r = data[i], g = data[i+1], b = data[i+2];
+
+      // Skip watermark pixels
+      if (watermarkMask && watermarkMask[pixelIdx]) {
+        continue;
+      }
 
       if (isTracePixel(r, g, b, gridColor, traceColor)) {
         const brightness = (r + g + b) / 3;
@@ -2376,7 +2626,36 @@ function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceCol
     trace.push({ x, y: finalY, weight: sumWeight });
   }
 
-  // Median filter to remove outliers
+  // Step 1: Outlier detection using local statistics
+  // Calculate running median and MAD (median absolute deviation)
+  const localWindow = 20;
+  for (let i = 0; i < trace.length; i++) {
+    if (trace[i].y === null) continue;
+
+    const neighbors = [];
+    for (let j = -localWindow; j <= localWindow; j++) {
+      const idx = i + j;
+      if (idx >= 0 && idx < trace.length && trace[idx].y !== null) {
+        neighbors.push(trace[idx].y);
+      }
+    }
+
+    if (neighbors.length >= 5) {
+      neighbors.sort((a, b) => a - b);
+      const localMedian = neighbors[Math.floor(neighbors.length / 2)];
+      const deviations = neighbors.map(v => Math.abs(v - localMedian));
+      deviations.sort((a, b) => a - b);
+      const mad = deviations[Math.floor(deviations.length / 2)] || 1;
+
+      // If this point is more than 3 MAD from local median, it's an outlier
+      const deviation = Math.abs(trace[i].y - localMedian);
+      if (deviation > mad * 3) {
+        trace[i].y = null; // Mark as outlier
+      }
+    }
+  }
+
+  // Step 2: Median filter to smooth remaining noise
   const medianFiltered = [];
   const medianWindow = 3;
   for (let i = 0; i < trace.length; i++) {
@@ -2395,7 +2674,7 @@ function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceCol
     }
   }
 
-  // Fill gaps using cubic interpolation
+  // Step 3: Fill gaps using linear interpolation
   for (let i = 0; i < medianFiltered.length; i++) {
     if (medianFiltered[i].y === null) {
       let left = i - 1;
@@ -2411,7 +2690,23 @@ function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceCol
     }
   }
 
-  return medianFiltered;
+  // Step 4: Light Gaussian smoothing for final cleanup
+  const smoothed = [];
+  const gaussWindow = 2;
+  for (let i = 0; i < medianFiltered.length; i++) {
+    let sum = 0, weightSum = 0;
+    for (let j = -gaussWindow; j <= gaussWindow; j++) {
+      const idx = i + j;
+      if (idx >= 0 && idx < medianFiltered.length && medianFiltered[idx].y !== null) {
+        const weight = Math.exp(-j * j / 2); // Gaussian weight
+        sum += medianFiltered[idx].y * weight;
+        weightSum += weight;
+      }
+    }
+    smoothed.push({ x: medianFiltered[i].x, y: weightSum > 0 ? sum / weightSum : medianFiltered[i].y });
+  }
+
+  return smoothed;
 }
 
 function resampleSignal(signal, targetLength) {
@@ -3755,8 +4050,18 @@ window.addEventListener('resize', redraw);
 // Initial draw
 redraw();
 
-// Generate initial case
-generate();
+// Check for URL parameters (from bookmarklet or direct link)
+const urlParams = new URLSearchParams(window.location.search);
+const imgParam = urlParams.get('img');
+
+if (imgParam) {
+  // Load image from URL parameter
+  showStatus('Loading ECG from URL...', 'info', 0);
+  loadImageFromURL(decodeURIComponent(imgParam));
+} else {
+  // Generate initial case
+  generate();
+}
 
 </script>
 </body>
