@@ -238,7 +238,7 @@ class TestDistributionMetrics:
     def test_age_bin_assignment(self, sample_ecg_data):
         """Test correct age bin assignment."""
         metrics = compute_distribution_metrics(sample_ecg_data)
-        assert metrics.age_bin in ["school_early", "school_late"]  # Age 8
+        assert metrics.age_bin == "school"  # Age 8 falls in "school" bin (6-12 years)
 
     def test_z_scores_computed(self, sample_ecg_data):
         """Test z-scores are computed."""

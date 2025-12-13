@@ -49,7 +49,14 @@ export function randn(rng) {
 // ============================================================================
 
 /**
- * Embedded pediatric ECG normal value priors
+ * Pediatric ECG normal value priors
+ *
+ * SOURCE OF TRUTH: /data/pediatric_priors.json
+ *
+ * This embedded copy must stay in sync with the JSON file.
+ * Python validation uses the JSON directly to prevent drift.
+ * If updating values, modify the JSON first, then update this copy.
+ *
  * Based on: Rijnbeek et al. 2001/2014, Bratincsák et al. 2020, Davignon et al. 1979
  */
 export const PEDIATRIC_PRIORS = {
@@ -316,6 +323,10 @@ export function hermiteFunction(t, n) {
  * @param {Array} coeffs - coefficients [c0, c1, c2, c3] for Hermite functions
  */
 export function hermiteQRS(t, sigma, coeffs) {
+  // Guard against division by zero and invalid inputs
+  if (sigma === 0 || !coeffs || coeffs.length === 0) {
+    return 0;
+  }
   const tNorm = t / sigma;
   let result = 0;
   for (let n = 0; n < coeffs.length && n < 5; n++) {

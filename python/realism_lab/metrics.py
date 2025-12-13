@@ -8,7 +8,9 @@ Provides functions to compute:
 - HRV metrics (SDNN, RMSSD, etc.)
 """
 
+import json
 import numpy as np
+from pathlib import Path
 from scipy import signal
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
@@ -17,23 +19,52 @@ from .io_ecgjson import ECGData
 
 
 # =============================================================================
-# PEDIATRIC PRIORS (from literature)
+# PEDIATRIC PRIORS
+# SOURCE OF TRUTH: /data/pediatric_priors.json
 # =============================================================================
 
-PEDIATRIC_PRIORS = {
-    "age_bins": [
-        {"id": "neonate", "age_range": [0, 0.08], "HR": {"mean": 145, "sd": 22}, "PR": {"mean": 100, "sd": 15}, "QRS": {"mean": 60, "sd": 8}, "QTc": {"mean": 400, "sd": 25}, "QRSaxis": {"mean": 125, "sd": 35}},
-        {"id": "infant_early", "age_range": [0.08, 0.25], "HR": {"mean": 150, "sd": 20}, "PR": {"mean": 105, "sd": 15}, "QRS": {"mean": 62, "sd": 8}, "QTc": {"mean": 400, "sd": 25}, "QRSaxis": {"mean": 100, "sd": 35}},
-        {"id": "infant_mid", "age_range": [0.25, 0.5], "HR": {"mean": 140, "sd": 20}, "PR": {"mean": 110, "sd": 18}, "QRS": {"mean": 65, "sd": 8}, "QTc": {"mean": 405, "sd": 25}, "QRSaxis": {"mean": 85, "sd": 35}},
-        {"id": "infant_late", "age_range": [0.5, 1.0], "HR": {"mean": 130, "sd": 18}, "PR": {"mean": 115, "sd": 20}, "QRS": {"mean": 68, "sd": 8}, "QTc": {"mean": 410, "sd": 25}, "QRSaxis": {"mean": 75, "sd": 35}},
-        {"id": "toddler", "age_range": [1.0, 3.0], "HR": {"mean": 115, "sd": 18}, "PR": {"mean": 120, "sd": 20}, "QRS": {"mean": 70, "sd": 8}, "QTc": {"mean": 410, "sd": 25}, "QRSaxis": {"mean": 65, "sd": 30}},
-        {"id": "preschool", "age_range": [3.0, 5.0], "HR": {"mean": 100, "sd": 15}, "PR": {"mean": 130, "sd": 22}, "QRS": {"mean": 72, "sd": 8}, "QTc": {"mean": 410, "sd": 22}, "QRSaxis": {"mean": 60, "sd": 28}},
-        {"id": "school_early", "age_range": [5.0, 8.0], "HR": {"mean": 90, "sd": 14}, "PR": {"mean": 140, "sd": 24}, "QRS": {"mean": 76, "sd": 10}, "QTc": {"mean": 410, "sd": 22}, "QRSaxis": {"mean": 58, "sd": 26}},
-        {"id": "school_late", "age_range": [8.0, 12.0], "HR": {"mean": 80, "sd": 12}, "PR": {"mean": 150, "sd": 26}, "QRS": {"mean": 80, "sd": 10}, "QTc": {"mean": 410, "sd": 20}, "QRSaxis": {"mean": 55, "sd": 25}},
-        {"id": "adolescent", "age_range": [12.0, 16.0], "HR": {"mean": 75, "sd": 12}, "PR": {"mean": 155, "sd": 28}, "QRS": {"mean": 85, "sd": 12}, "QTc": {"mean": 410, "sd": 20}, "QRSaxis": {"mean": 52, "sd": 24}},
-        {"id": "young_adult", "age_range": [16.0, 100.0], "HR": {"mean": 70, "sd": 12}, "PR": {"mean": 160, "sd": 28}, "QRS": {"mean": 90, "sd": 12}, "QTc": {"mean": 410, "sd": 20}, "QRSaxis": {"mean": 50, "sd": 30}},
+def _load_pediatric_priors() -> Dict:
+    """Load pediatric priors from JSON source of truth."""
+    # Try to load from the canonical JSON file
+    json_paths = [
+        Path(__file__).parent.parent.parent / "data" / "pediatric_priors.json",
+        Path(__file__).parent.parent / "data" / "pediatric_priors.json",
     ]
-}
+
+    for json_path in json_paths:
+        if json_path.exists():
+            with open(json_path) as f:
+                data = json.load(f)
+                # Convert PR/QRS/QTc from seconds to ms for consistency with validation
+                for bin_data in data["age_bins"]:
+                    if "PR" in bin_data and bin_data["PR"]["mean"] < 1:
+                        bin_data["PR"]["mean"] = int(bin_data["PR"]["mean"] * 1000)
+                        bin_data["PR"]["sd"] = int(bin_data["PR"]["sd"] * 1000)
+                    if "QRS" in bin_data and bin_data["QRS"]["mean"] < 1:
+                        bin_data["QRS"]["mean"] = int(bin_data["QRS"]["mean"] * 1000)
+                        bin_data["QRS"]["sd"] = int(bin_data["QRS"]["sd"] * 1000)
+                    if "QTc" in bin_data and bin_data["QTc"]["mean"] < 1:
+                        bin_data["QTc"]["mean"] = int(bin_data["QTc"]["mean"] * 1000)
+                        bin_data["QTc"]["sd"] = int(bin_data["QTc"]["sd"] * 1000)
+                return data
+
+    # Fallback to embedded version (kept for backwards compatibility)
+    return {
+        "age_bins": [
+            {"id": "neonate", "age_range": [0, 0.08], "HR": {"mean": 145, "sd": 22}, "PR": {"mean": 100, "sd": 15}, "QRS": {"mean": 60, "sd": 8}, "QTc": {"mean": 400, "sd": 25}, "QRSaxis": {"mean": 125, "sd": 35}},
+            {"id": "infant_early", "age_range": [0.08, 0.25], "HR": {"mean": 150, "sd": 20}, "PR": {"mean": 105, "sd": 15}, "QRS": {"mean": 62, "sd": 8}, "QTc": {"mean": 400, "sd": 25}, "QRSaxis": {"mean": 100, "sd": 35}},
+            {"id": "infant_mid", "age_range": [0.25, 0.5], "HR": {"mean": 140, "sd": 20}, "PR": {"mean": 110, "sd": 18}, "QRS": {"mean": 65, "sd": 8}, "QTc": {"mean": 405, "sd": 25}, "QRSaxis": {"mean": 85, "sd": 35}},
+            {"id": "infant_late", "age_range": [0.5, 1.0], "HR": {"mean": 130, "sd": 18}, "PR": {"mean": 115, "sd": 20}, "QRS": {"mean": 68, "sd": 8}, "QTc": {"mean": 410, "sd": 25}, "QRSaxis": {"mean": 75, "sd": 35}},
+            {"id": "toddler", "age_range": [1.0, 3.0], "HR": {"mean": 115, "sd": 18}, "PR": {"mean": 120, "sd": 20}, "QRS": {"mean": 70, "sd": 8}, "QTc": {"mean": 410, "sd": 25}, "QRSaxis": {"mean": 65, "sd": 30}},
+            {"id": "preschool", "age_range": [3.0, 6.0], "HR": {"mean": 100, "sd": 15}, "PR": {"mean": 130, "sd": 22}, "QRS": {"mean": 75, "sd": 10}, "QTc": {"mean": 415, "sd": 25}, "QRSaxis": {"mean": 60, "sd": 25}},
+            {"id": "school", "age_range": [6.0, 12.0], "HR": {"mean": 85, "sd": 15}, "PR": {"mean": 140, "sd": 25}, "QRS": {"mean": 80, "sd": 12}, "QTc": {"mean": 420, "sd": 25}, "QRSaxis": {"mean": 55, "sd": 25}},
+            {"id": "adolescent", "age_range": [12.0, 18.0], "HR": {"mean": 75, "sd": 12}, "PR": {"mean": 150, "sd": 28}, "QRS": {"mean": 85, "sd": 12}, "QTc": {"mean": 420, "sd": 25}, "QRSaxis": {"mean": 55, "sd": 25}},
+            {"id": "young_adult", "age_range": [18.0, 40.0], "HR": {"mean": 72, "sd": 12}, "PR": {"mean": 160, "sd": 30}, "QRS": {"mean": 90, "sd": 12}, "QTc": {"mean": 420, "sd": 25}, "QRSaxis": {"mean": 50, "sd": 30}},
+            {"id": "adult", "age_range": [40.0, 150.0], "HR": {"mean": 70, "sd": 12}, "PR": {"mean": 165, "sd": 32}, "QRS": {"mean": 92, "sd": 14}, "QTc": {"mean": 425, "sd": 28}, "QRSaxis": {"mean": 45, "sd": 35}},
+        ]
+    }
+
+PEDIATRIC_PRIORS = _load_pediatric_priors()
 
 
 def get_age_bin(age_years: float) -> Dict:

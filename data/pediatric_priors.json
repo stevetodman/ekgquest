@@ -1,0 +1,156 @@
+{
+  "version": "1.0",
+  "description": "Age-specific ECG parameter distributions for synthesis and validation. Based on published pediatric ECG norms.",
+  "sources": [
+    "Rijnbeek et al. 2001 (Eur Heart J 22:702-711)",
+    "Davignon et al. 1979",
+    "Bratincsák et al. 2020"
+  ],
+  "units": {
+    "HR": "bpm",
+    "PR": "seconds",
+    "QRS": "seconds",
+    "QTc": "seconds",
+    "QRSaxis": "degrees",
+    "Taxis": "degrees",
+    "Paxis": "degrees"
+  },
+  "age_bins": [
+    {
+      "id": "neonate",
+      "age_range": [0, 0.08],
+      "HR": {"mean": 145, "sd": 22},
+      "PR": {"mean": 0.100, "sd": 0.015},
+      "QRS": {"mean": 0.060, "sd": 0.008},
+      "QTc": {"mean": 0.400, "sd": 0.025},
+      "QRSaxis": {"mean": 125, "sd": 35},
+      "Taxis": {"mean": 85, "sd": 40},
+      "Paxis": {"mean": 60, "sd": 20}
+    },
+    {
+      "id": "infant_early",
+      "age_range": [0.08, 0.25],
+      "HR": {"mean": 150, "sd": 20},
+      "PR": {"mean": 0.105, "sd": 0.015},
+      "QRS": {"mean": 0.062, "sd": 0.008},
+      "QTc": {"mean": 0.400, "sd": 0.025},
+      "QRSaxis": {"mean": 100, "sd": 35},
+      "Taxis": {"mean": 70, "sd": 35},
+      "Paxis": {"mean": 58, "sd": 18}
+    },
+    {
+      "id": "infant_mid",
+      "age_range": [0.25, 0.5],
+      "HR": {"mean": 140, "sd": 20},
+      "PR": {"mean": 0.110, "sd": 0.018},
+      "QRS": {"mean": 0.065, "sd": 0.008},
+      "QTc": {"mean": 0.405, "sd": 0.025},
+      "QRSaxis": {"mean": 85, "sd": 35},
+      "Taxis": {"mean": 55, "sd": 30},
+      "Paxis": {"mean": 55, "sd": 18}
+    },
+    {
+      "id": "infant_late",
+      "age_range": [0.5, 1.0],
+      "HR": {"mean": 130, "sd": 18},
+      "PR": {"mean": 0.115, "sd": 0.020},
+      "QRS": {"mean": 0.068, "sd": 0.008},
+      "QTc": {"mean": 0.410, "sd": 0.025},
+      "QRSaxis": {"mean": 75, "sd": 35},
+      "Taxis": {"mean": 50, "sd": 25},
+      "Paxis": {"mean": 52, "sd": 15}
+    },
+    {
+      "id": "toddler",
+      "age_range": [1.0, 3.0],
+      "HR": {"mean": 115, "sd": 18},
+      "PR": {"mean": 0.120, "sd": 0.020},
+      "QRS": {"mean": 0.070, "sd": 0.008},
+      "QTc": {"mean": 0.410, "sd": 0.025},
+      "QRSaxis": {"mean": 65, "sd": 30},
+      "Taxis": {"mean": 45, "sd": 25},
+      "Paxis": {"mean": 50, "sd": 15}
+    },
+    {
+      "id": "preschool",
+      "age_range": [3.0, 6.0],
+      "HR": {"mean": 100, "sd": 15},
+      "PR": {"mean": 0.130, "sd": 0.022},
+      "QRS": {"mean": 0.075, "sd": 0.010},
+      "QTc": {"mean": 0.415, "sd": 0.025},
+      "QRSaxis": {"mean": 60, "sd": 25},
+      "Taxis": {"mean": 40, "sd": 20},
+      "Paxis": {"mean": 48, "sd": 12}
+    },
+    {
+      "id": "school",
+      "age_range": [6.0, 12.0],
+      "HR": {"mean": 85, "sd": 15},
+      "PR": {"mean": 0.140, "sd": 0.025},
+      "QRS": {"mean": 0.080, "sd": 0.012},
+      "QTc": {"mean": 0.420, "sd": 0.025},
+      "QRSaxis": {"mean": 55, "sd": 25},
+      "Taxis": {"mean": 38, "sd": 18},
+      "Paxis": {"mean": 45, "sd": 12}
+    },
+    {
+      "id": "adolescent",
+      "age_range": [12.0, 18.0],
+      "HR": {"mean": 75, "sd": 12},
+      "PR": {"mean": 0.150, "sd": 0.028},
+      "QRS": {"mean": 0.085, "sd": 0.012},
+      "QTc": {"mean": 0.420, "sd": 0.025},
+      "QRSaxis": {"mean": 55, "sd": 25},
+      "Taxis": {"mean": 35, "sd": 18},
+      "Paxis": {"mean": 45, "sd": 12}
+    },
+    {
+      "id": "young_adult",
+      "age_range": [18.0, 40.0],
+      "HR": {"mean": 72, "sd": 12},
+      "PR": {"mean": 0.160, "sd": 0.030},
+      "QRS": {"mean": 0.090, "sd": 0.012},
+      "QTc": {"mean": 0.420, "sd": 0.025},
+      "QRSaxis": {"mean": 50, "sd": 30},
+      "Taxis": {"mean": 35, "sd": 20},
+      "Paxis": {"mean": 45, "sd": 15}
+    },
+    {
+      "id": "adult",
+      "age_range": [40.0, 150.0],
+      "HR": {"mean": 70, "sd": 12},
+      "PR": {"mean": 0.165, "sd": 0.032},
+      "QRS": {"mean": 0.092, "sd": 0.014},
+      "QTc": {"mean": 0.425, "sd": 0.028},
+      "QRSaxis": {"mean": 45, "sd": 35},
+      "Taxis": {"mean": 35, "sd": 22},
+      "Paxis": {"mean": 45, "sd": 18}
+    }
+  ],
+  "morphology": {
+    "rvDom": [
+      {"age": 0, "mean": 0.9, "sd": 0.08},
+      {"age": 0.5, "mean": 0.75, "sd": 0.1},
+      {"age": 2, "mean": 0.5, "sd": 0.12},
+      {"age": 6, "mean": 0.2, "sd": 0.1},
+      {"age": 12, "mean": 0.05, "sd": 0.05}
+    ],
+    "juvenileT": [
+      {"age": 0, "mean": 0.8, "sd": 0.15},
+      {"age": 3, "mean": 0.9, "sd": 0.1},
+      {"age": 8, "mean": 0.7, "sd": 0.15},
+      {"age": 14, "mean": 0.3, "sd": 0.2},
+      {"age": 18, "mean": 0.0, "sd": 0.05}
+    ]
+  },
+  "sex_adjustments": {
+    "male": {
+      "QTc_offset": -0.005,
+      "QRS_factor": 1.02
+    },
+    "female": {
+      "QTc_offset": 0.005,
+      "QRS_factor": 0.98
+    }
+  }
+}
