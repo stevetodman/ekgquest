@@ -1,21 +1,149 @@
 // Shared ECG utilities: schema normalization, integrity checks, detection, and measurements.
 
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+/**
+ * @typedef {Object} LeadsUV
+ * @property {Int16Array} I - Lead I signal in µV
+ * @property {Int16Array} II - Lead II signal in µV
+ * @property {Int16Array} III - Lead III signal in µV
+ * @property {Int16Array} aVR - Augmented aVR signal in µV
+ * @property {Int16Array} aVL - Augmented aVL signal in µV
+ * @property {Int16Array} aVF - Augmented aVF signal in µV
+ * @property {Int16Array} V1 - Precordial V1 signal in µV
+ * @property {Int16Array} V2 - Precordial V2 signal in µV
+ * @property {Int16Array} V3 - Precordial V3 signal in µV
+ * @property {Int16Array} V4 - Precordial V4 signal in µV
+ * @property {Int16Array} V5 - Precordial V5 signal in µV
+ * @property {Int16Array} V6 - Precordial V6 signal in µV
+ * @property {Int16Array} [V3R] - Right precordial V3R (optional)
+ * @property {Int16Array} [V4R] - Right precordial V4R (optional)
+ * @property {Int16Array} [V7] - Posterior V7 (optional)
+ */
+
+/**
+ * @typedef {Object} ECGTargets
+ * @property {number} HR_bpm - Heart rate in beats per minute
+ * @property {number} PR_ms - PR interval in milliseconds
+ * @property {number} QRS_ms - QRS duration in milliseconds
+ * @property {number} QTc_ms - Corrected QT interval in milliseconds
+ * @property {{P: number, QRS: number, T: number}} axes_deg - Axis angles in degrees
+ * @property {{SDNN: number, RMSSD: number, pNN50: number}} hrv - HRV metrics
+ * @property {boolean} synthetic - True if synthetically generated
+ * @property {string} dx - Diagnosis string
+ * @property {number} [ageY] - Age in years
+ * @property {string} [sex] - Sex (male/female)
+ */
+
+/**
+ * @typedef {Object} ECGIntegrity
+ * @property {number} [einthoven_max_abs_error_uV] - Max Einthoven law error
+ * @property {number} [avr_relation_max_abs_error_uV] - Max aVR relation error
+ * @property {number} [avl_relation_max_abs_error_uV] - Max aVL relation error
+ * @property {number} [avf_relation_max_abs_error_uV] - Max aVF relation error
+ * @property {number} [augmented_sum_max_abs_error_uV] - Max augmented sum error
+ */
+
+/**
+ * @typedef {Object} ECGMeta
+ * @property {number} schema_version - Schema version (currently 1)
+ * @property {number} fs - Sample rate in Hz
+ * @property {number} duration_s - Duration in seconds
+ * @property {LeadsUV} leads_uV - Lead signals in microvolts
+ * @property {ECGTargets} targets - Ground truth targets
+ * @property {ECGIntegrity} integrity - Physics integrity checks
+ */
+
+/**
+ * @typedef {Object} ValidationResult
+ * @property {string[]} errors - Critical errors
+ * @property {string[]} warnings - Non-critical warnings
+ */
+
+/**
+ * @typedef {Object} MedianBeat
+ * @property {boolean} ok - Whether median beat was successfully computed
+ * @property {string} [reason] - Failure reason if not ok
+ * @property {number} [beatsUsed] - Number of beats used
+ * @property {number} [rIdxMed] - R-peak index in median beat
+ * @property {number} [fs] - Sample rate
+ * @property {Object.<string, Float64Array>} [medianLeads_uV] - Median lead signals
+ */
+
+/**
+ * @typedef {Object} MedianFiducials
+ * @property {number} med_rIdx - R-peak index
+ * @property {number} med_qOn - QRS onset index
+ * @property {number} med_qOff - QRS offset index
+ * @property {number|null} med_pOn - P-wave onset (null if not found)
+ * @property {number|null} med_tEnd - T-wave end (null if not found)
+ */
+
+/**
+ * @typedef {Object} GlobalMeasurements
+ * @property {number|null} rr - Mean RR interval in seconds
+ * @property {number|null} hr - Heart rate in bpm
+ * @property {number|null} PR - PR interval in ms
+ * @property {number|null} QRS - QRS duration in ms
+ * @property {number|null} QT - QT interval in ms
+ * @property {number|null} QTcB - Bazett-corrected QT in ms
+ * @property {number|null} QTcF - Fridericia-corrected QT in ms
+ * @property {number|null} QTcFram - Framingham-corrected QT in ms
+ * @property {{pAxis: number|null, qAxis: number|null, tAxis: number|null}} axes - Axis measurements
+ */
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
 export const ECG_SCHEMA_VERSION = 1;
 const VIEWER_REQUIRED_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"];
 
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Clamp a value between min and max
+ * @param {number} x - Value to clamp
+ * @param {number} a - Minimum value
+ * @param {number} b - Maximum value
+ * @returns {number} Clamped value
+ */
 export function clamp(x, a, b) {
   return Math.max(a, Math.min(b, x));
 }
 
+/**
+ * Linear interpolation between two values
+ * @param {number} a - Start value
+ * @param {number} b - End value
+ * @param {number} u - Interpolation factor (0-1)
+ * @returns {number} Interpolated value
+ */
 export function lerp(a, b, u) {
   return a + (b - a) * u;
 }
 
+/**
+ * Compute median of a small array (modifies array order)
+ * @param {number[]} arr - Input array
+ * @returns {number} Median value
+ */
 export function medianOfSmallArray(arr) {
   const copy = [...arr].sort((x, y) => x - y);
   return copy[(copy.length / 2) | 0];
 }
 
+/**
+ * Compute median of a window in an array
+ * @param {number[]|Int16Array|Float64Array} arr - Input array
+ * @param {number} i0 - Start index
+ * @param {number} i1 - End index
+ * @returns {number} Median value in window
+ */
 export function medianWindow(arr, i0, i1) {
   const L = arr.length;
   i0 = clamp(i0 | 0, 0, L - 1);
@@ -26,6 +154,11 @@ export function medianWindow(arr, i0, i1) {
   return medianOfSmallArray(tmp);
 }
 
+/**
+ * Compute mean of an array, ignoring null/undefined values
+ * @param {(number|null)[]} arr - Input array
+ * @returns {number|null} Mean value or null if empty
+ */
 export function mean(arr) {
   if (!arr || arr.length === 0) return null;
   let s = 0;
@@ -38,6 +171,11 @@ export function mean(arr) {
   return n === 0 ? null : s / n;
 }
 
+/**
+ * Convert array to Int16Array
+ * @param {number[]|Int16Array} arr - Input array
+ * @returns {Int16Array} Int16 typed array
+ */
 function toInt16(arr) {
   if (arr instanceof Int16Array) return arr;
   const out = new Int16Array(arr.length);
@@ -48,7 +186,17 @@ function toInt16(arr) {
   return out;
 }
 
-// Normalizes any raw ECG JSON object into the canonical schema.
+// ============================================================================
+// SCHEMA NORMALIZATION
+// ============================================================================
+
+/**
+ * Normalizes any raw ECG JSON object into the canonical schema.
+ * Converts all lead arrays to Int16Array and validates structure.
+ * @param {Object} raw - Raw ECG data (may have various formats)
+ * @returns {ECGMeta} Normalized ECG data
+ * @throws {Error} If required fields are missing or invalid
+ */
 export function normalizeECGData(raw) {
   if (!raw) throw new Error("ECG payload is empty");
   if (!raw.fs) throw new Error("ECG payload missing fs");
@@ -90,6 +238,11 @@ export function normalizeECGData(raw) {
   };
 }
 
+/**
+ * Validates ECG data structure and content.
+ * @param {ECGMeta} meta - Normalized ECG data
+ * @returns {ValidationResult} Validation errors and warnings
+ */
 export function validateECGData(meta) {
   const errors = [];
   const warnings = [];
@@ -129,6 +282,12 @@ export function validateECGData(meta) {
   return { errors, warnings };
 }
 
+/**
+ * Fetch ECG data from a URL and normalize it.
+ * @param {string} url - URL to fetch ECG JSON from
+ * @returns {Promise<ECGMeta>} Normalized ECG data with integrity checks
+ * @throws {Error} If fetch fails or data is invalid
+ */
 export async function fetchECG(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status} ${res.statusText}`);
@@ -138,7 +297,17 @@ export async function fetchECG(url) {
   return meta;
 }
 
-// Einthoven and augmented-lead consistency checks.
+// ============================================================================
+// PHYSICS INTEGRITY CHECKS
+// ============================================================================
+
+/**
+ * Verify Einthoven's law and augmented lead relationships.
+ * Einthoven: II = I + III (within tolerance)
+ * Augmented: aVR + aVL + aVF = 0 (within tolerance)
+ * @param {LeadsUV} L - Lead signals
+ * @returns {ECGIntegrity} Maximum errors in µV
+ */
 export function physicsChecks(L) {
   const required = ["I", "II", "III", "aVR", "aVL", "aVF"];
   const missing = required.filter((k) => !L || !L[k]);
@@ -177,16 +346,20 @@ export function physicsChecks(L) {
   };
 }
 
-// Simple derivative + MWA-based R-peak detection on Lead II.
-export function detectRPeaks(meta) {
-  const fs = meta.fs;
-  const x = meta.leads_uV.II;
-  const n = x.length;
+// Single-lead derivative + MWA-based R-peak detection
+// preferPositive: if true, prefer positive peaks (R-wave) over negative (S-wave)
+function detectRPeaksSingleLead(signal, fs, threshold = 0.35, preferPositive = true) {
+  const n = signal.length;
+  if (n < 10) return [];
+
+  // Squared derivative
   const sq = new Float64Array(n);
   for (let i = 1; i < n; i++) {
-    const d = x[i] - x[i - 1];
+    const d = signal[i] - signal[i - 1];
     sq[i] = d * d;
   }
+
+  // Moving window average
   const win = Math.max(1, Math.floor(0.08 * fs));
   const mwa = new Float64Array(n);
   let s = 0;
@@ -195,59 +368,161 @@ export function detectRPeaks(meta) {
     if (i >= win) s -= sq[i - win];
     mwa[i] = s / win;
   }
+
+  // Find threshold
   let maxM = 0;
   for (let i = 0; i < n; i++) if (mwa[i] > maxM) maxM = mwa[i];
-  const thr = 0.35 * maxM;
+  const thr = threshold * maxM;
   const refractory = Math.floor(0.25 * fs);
 
-  const rPeaks = [];
+  // Detect peaks
+  const peaks = [];
   let i = win;
   while (i < n - 2) {
     if (mwa[i] > thr && mwa[i] > mwa[i - 1] && mwa[i] >= mwa[i + 1]) {
+      // Refine to actual signal peak - look for R-wave (positive) or S-wave (negative)
       const L = Math.max(0, i - Math.floor(0.05 * fs));
       const R = Math.min(n - 1, i + Math.floor(0.05 * fs));
-      let best = -1,
-        r = i;
+
+      // Find both positive max and negative min in the window
+      let posMax = -Infinity, posPeak = i;
+      let negMin = Infinity, negPeak = i;
       for (let k = L; k <= R; k++) {
-        const a = Math.abs(x[k]);
-        if (a > best) {
-          best = a;
-          r = k;
-        }
+        if (signal[k] > posMax) { posMax = signal[k]; posPeak = k; }
+        if (signal[k] < negMin) { negMin = signal[k]; negPeak = k; }
       }
-      if (rPeaks.length === 0 || r - rPeaks[rPeaks.length - 1] > Math.floor(0.3 * fs))
-        rPeaks.push(r);
+
+      // Choose the peak: prefer positive (R-wave) if it's significant,
+      // otherwise use the largest absolute deflection
+      let r;
+      if (preferPositive && posMax > 0 && posMax >= Math.abs(negMin) * 0.3) {
+        // Use positive peak if it's at least 30% of the negative deflection
+        r = posPeak;
+      } else if (!preferPositive && negMin < 0 && Math.abs(negMin) >= posMax * 0.3) {
+        // Use negative peak if requested and significant
+        r = negPeak;
+      } else {
+        // Fallback: use largest absolute deflection
+        r = Math.abs(posMax) >= Math.abs(negMin) ? posPeak : negPeak;
+      }
+
+      if (peaks.length === 0 || r - peaks[peaks.length - 1] > Math.floor(0.3 * fs)) {
+        peaks.push(r);
+      }
       i = r + refractory;
     } else i++;
   }
 
-  // Fallback: if we know the target HR but detected too few beats, seed peaks near expected RR
-  const targetHR = meta.targets && meta.targets.HR_bpm;
-  if (targetHR && rPeaks.length < Math.max(3, Math.floor((n / fs) * (targetHR / 60) * 0.9))) {
-    const expectedRR = Math.max(0.3, 60 / targetHR) * fs;
-    const minGap = Math.max(0.2 * fs, expectedRR * 0.45);
-    for (let start = 0; start < n; start += expectedRR) {
-      const w = Math.min(n - 1, Math.floor(start + expectedRR * 0.8));
-      let bestIdx = null,
-        bestAmp = 0;
-      for (let k = Math.floor(Math.max(0, start - expectedRR * 0.2)); k <= w; k++) {
-        const a = Math.abs(x[k]);
-        if (a > bestAmp) {
-          bestAmp = a;
-          bestIdx = k;
+  return peaks;
+}
+
+// Multi-lead R-peak detection with consensus voting
+// Uses multiple leads for robustness, especially for arrhythmias
+export function detectRPeaks(meta) {
+  const fs = meta.fs;
+  const leads = meta.leads_uV;
+  if (!leads) return [];
+
+  // Priority order for R-peak detection (best leads first)
+  // II, aVF, I are typically positive; V1-V2 have large deflections
+  const leadPriority = ['II', 'aVF', 'I', 'V2', 'V1', 'V3', 'III', 'V4', 'V5', 'V6'];
+  const availableLeads = leadPriority.filter(l => leads[l] && leads[l].length > 0);
+
+  if (availableLeads.length === 0) return [];
+
+  const n = leads[availableLeads[0]].length;
+
+  // Detect peaks in each available lead
+  const allPeakSets = [];
+  for (const leadName of availableLeads.slice(0, 4)) { // Use up to 4 leads
+    const signal = leads[leadName];
+    const peaks = detectRPeaksSingleLead(signal, fs, 0.30);
+    if (peaks.length > 0) {
+      allPeakSets.push({ lead: leadName, peaks });
+    }
+  }
+
+  if (allPeakSets.length === 0) return [];
+
+  // If only one lead available, use it directly
+  if (allPeakSets.length === 1) {
+    return applyHRFallback(allPeakSets[0].peaks, meta, n, fs);
+  }
+
+  // Consensus: merge peaks from all leads
+  // A peak is confirmed if detected in multiple leads within a small window
+  const tolerance = Math.floor(0.04 * fs); // 40ms tolerance
+  const candidatePeaks = new Map(); // index -> vote count
+
+  for (const { peaks } of allPeakSets) {
+    for (const p of peaks) {
+      // Find or create a candidate near this peak
+      let found = false;
+      for (const [idx, count] of candidatePeaks) {
+        if (Math.abs(idx - p) <= tolerance) {
+          // Vote for existing candidate (use average position)
+          const newIdx = Math.round((idx * count + p) / (count + 1));
+          candidatePeaks.delete(idx);
+          candidatePeaks.set(newIdx, count + 1);
+          found = true;
+          break;
         }
       }
-      if (bestIdx != null) {
-        // Insert if not near an existing peak
-        let canInsert = true;
-        let pos = 0;
-        while (pos < rPeaks.length && rPeaks[pos] < bestIdx) pos++;
-        const leftDiff = pos > 0 ? bestIdx - rPeaks[pos - 1] : Infinity;
-        const rightDiff = pos < rPeaks.length ? rPeaks[pos] - bestIdx : Infinity;
-        if (leftDiff < minGap || rightDiff < minGap) canInsert = false;
-        if (canInsert) {
-          rPeaks.splice(pos, 0, bestIdx);
-        }
+      if (!found) {
+        candidatePeaks.set(p, 1);
+      }
+    }
+  }
+
+  // Accept peaks with at least 2 votes (or 1 if only 1-2 leads available)
+  const minVotes = allPeakSets.length <= 2 ? 1 : 2;
+  let consensusPeaks = [];
+  for (const [idx, count] of candidatePeaks) {
+    if (count >= minVotes) {
+      consensusPeaks.push(idx);
+    }
+  }
+  consensusPeaks.sort((a, b) => a - b);
+
+  // Remove peaks that are too close together
+  const minGap = Math.floor(0.25 * fs);
+  const filtered = [];
+  for (const p of consensusPeaks) {
+    if (filtered.length === 0 || p - filtered[filtered.length - 1] > minGap) {
+      filtered.push(p);
+    }
+  }
+
+  return applyHRFallback(filtered, meta, n, fs);
+}
+
+// Fallback: if we know the target HR but detected too few beats, seed peaks
+function applyHRFallback(rPeaks, meta, n, fs) {
+  const targetHR = meta.targets && meta.targets.HR_bpm;
+  const primaryLead = meta.leads_uV.II || meta.leads_uV.I || meta.leads_uV.V2;
+
+  if (!targetHR || !primaryLead) return rPeaks;
+
+  const expectedBeats = Math.floor((n / fs) * (targetHR / 60) * 0.9);
+  if (rPeaks.length >= Math.max(3, expectedBeats)) return rPeaks;
+
+  const expectedRR = Math.max(0.3, 60 / targetHR) * fs;
+  const minGap = Math.max(0.2 * fs, expectedRR * 0.45);
+
+  for (let start = 0; start < n; start += expectedRR) {
+    const w = Math.min(n - 1, Math.floor(start + expectedRR * 0.8));
+    let bestIdx = null, bestAmp = 0;
+    for (let k = Math.floor(Math.max(0, start - expectedRR * 0.2)); k <= w; k++) {
+      const a = Math.abs(primaryLead[k]);
+      if (a > bestAmp) { bestAmp = a; bestIdx = k; }
+    }
+    if (bestIdx != null) {
+      let pos = 0;
+      while (pos < rPeaks.length && rPeaks[pos] < bestIdx) pos++;
+      const leftDiff = pos > 0 ? bestIdx - rPeaks[pos - 1] : Infinity;
+      const rightDiff = pos < rPeaks.length ? rPeaks[pos] - bestIdx : Infinity;
+      if (leftDiff >= minGap && rightDiff >= minGap) {
+        rPeaks.splice(pos, 0, bestIdx);
       }
     }
   }

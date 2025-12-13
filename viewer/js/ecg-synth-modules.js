@@ -332,12 +332,16 @@ export const DIAGNOSES = [
   "RVH",
   "SVT (narrow)",
   "Atrial flutter (2:1)",
+  "Atrial fibrillation",
   "1st degree AVB",
   "2nd degree AVB (Wenckebach)",
   "2nd degree AVB (Mobitz II)",
   "3rd degree AVB",
   "Long QT",
   "Pericarditis",
+  "STEMI (anterior)",
+  "Hyperkalemia",
+  "Brugada (Type 1)",
   "PACs",
   "PVCs",
   "Sinus bradycardia",
@@ -445,6 +449,25 @@ export function applyDx(p, dx) {
   }
   if (dx === "Sinus tachycardia") {
     q.HR = Math.max(100, Math.min(150, p.HR * 1.4));
+  }
+  // Atrial fibrillation: irregularly irregular, typically faster ventricular rate
+  if (dx === "Atrial fibrillation") {
+    q.HR = Math.max(80, Math.min(160, p.HR * 1.3));
+    q.afib = true; // Flag for rhythm model to generate irregular RR
+  }
+  // STEMI (anterior): normal intervals, morphology changes handled in morphologyModel
+  if (dx === "STEMI (anterior)") {
+    q.stemi = "anterior";
+  }
+  // Hyperkalemia: prolonged PR, widened QRS, peaked T waves
+  if (dx === "Hyperkalemia") {
+    q.PR = Math.min(0.28, p.PR + 0.04);
+    q.QRS = Math.min(0.18, p.QRS + 0.05);
+    q.hyperK = true;
+  }
+  // Brugada Type 1: coved ST elevation in V1-V2, normal intervals
+  if (dx === "Brugada (Type 1)") {
+    q.brugada = true;
   }
   return q;
 }
@@ -965,8 +988,8 @@ export function rhythmModel(params, dx, duration, seed, ageY = 30) {
   // Get age-appropriate HRV parameters
   const hrvParams = getHRVParams(ageY);
 
-  // Disable HRV for certain rhythms
-  const disableHRV = dx.includes("flutter") || dx.includes("SVT") || dx.includes("AVB");
+  // Disable regular HRV for certain rhythms
+  const disableHRV = dx.includes("flutter") || dx.includes("SVT") || dx.includes("AVB") || dx === "Atrial fibrillation";
   const effectiveHRV = disableHRV ? {
     rsaAmp: 0, rsaFreq: hrvParams.rsaFreq,
     lfAmp: 0, lfFreq: hrvParams.lfFreq,
@@ -1061,6 +1084,18 @@ export function rhythmModel(params, dx, duration, seed, ageY = 30) {
         const pvcTime = pT + RR0 * couplingInterval;
         beats.push({ pTime: null, qrsTime: pvcTime, hasPWave: false, hasQRS: true, isPVC: true, prInterval: null });
       }
+    }
+  } else if (dx === "Atrial fibrillation") {
+    // Irregularly irregular rhythm: no P waves, highly variable RR intervals
+    let qrsTime = 0.4 + rng() * 0.2;
+    while (qrsTime < duration - 0.6) {
+      beats.push({ pTime: null, qrsTime, hasPWave: false, hasQRS: true, isPVC: false, prInterval: null });
+      // AFib has large RR variability (coefficient of variation ~20-30%)
+      const baseRR = RR0;
+      const rrVariation = baseRR * 0.35 * (rng() * 2 - 1); // ±35% variation
+      const nextRR = clamp(baseRR + rrVariation, 0.35, 1.5);
+      rrIntervals.push(nextRR);
+      qrsTime += nextRR;
     }
   } else {
     // Normal conduction
@@ -1425,7 +1460,7 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed, ageY = 8)
   const dT1 = axisDir(params.Taxis, params.zT * (0.6 + 0.4 * params.juvenileT));
   const dT2 = norm([dT1[0] * 0.9, dT1[1] * 1.05, dT1[2] * 1.1]);
 
-  // Atrial flutter waves
+  // Atrial flutter waves (sawtooth pattern at ~300 bpm)
   if (dx === "Atrial flutter (2:1)") {
     const f = 5.0, amp = 0.07;
     const dF = axisDir(params.Paxis, 0.1);
@@ -1433,6 +1468,28 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed, ageY = 8)
       const x = (i / fs) * f;
       const saw = 2 * (x - Math.floor(x + 0.5));
       const F = amp * saw;
+      Vx[i] += F * dF[0];
+      Vy[i] += F * dF[1];
+      Vz[i] += F * dF[2];
+    }
+  }
+
+  // Atrial fibrillation: chaotic fibrillatory baseline (f waves ~350-600/min)
+  if (dx === "Atrial fibrillation") {
+    const afibRng = mulberry32(seed + 7777);
+    const dF = axisDir(params.Paxis, 0.1);
+    // Multiple overlapping sinusoids for chaotic appearance
+    const freqs = [5.5, 6.8, 8.2, 10.1]; // 330-600 bpm range
+    const amps = [0.025, 0.02, 0.015, 0.01];
+    const phases = freqs.map(() => afibRng() * 2 * Math.PI);
+    for (let i = 0; i < N; i++) {
+      const t = i / fs;
+      let F = 0;
+      for (let k = 0; k < freqs.length; k++) {
+        F += amps[k] * Math.sin(2 * Math.PI * freqs[k] * t + phases[k]);
+      }
+      // Add some random flutter for more realistic appearance
+      F += 0.008 * (afibRng() - 0.5);
       Vx[i] += F * dF[0];
       Vy[i] += F * dF[1];
       Vz[i] += F * dF[2];
@@ -1524,6 +1581,74 @@ export function morphologyModel(beatSchedule, params, dx, fs, N, seed, ageY = 8)
           Vx[i] += stPlate * dST[0] + prPlate * dPR[0];
           Vy[i] += stPlate * dST[1] + prPlate * dPR[1];
           Vz[i] += stPlate * dST[2] + prPlate * dPR[2];
+        }
+      }
+
+      // STEMI (anterior): ST elevation in V1-V4, I, aVL direction
+      // Reciprocal ST depression in inferior leads (II, III, aVF)
+      if (dx === "STEMI (anterior)" && !beat.isPVC) {
+        const tau = 0.008;
+        // Anterior direction (positive in V1-V4, anterolateral)
+        const dSTElev = norm([-0.3, -0.2, 0.95]); // Anterior wall vector
+        // Inferior direction for reciprocal depression
+        const dSTDepr = norm([0.0, 0.9, -0.1]); // Inferior wall vector
+        function sigST(tt) {
+          return 0.5 * (1 + Math.tanh(tt / tau));
+        }
+        const jPoint = qrsOn + params.QRS + 0.02;
+        const stEnd = qrsOn + QT * 0.4;
+        const aElev = 0.18 * jitter.ampJitter;  // ST elevation amplitude
+        const aDepr = -0.08 * jitter.ampJitter; // Reciprocal depression
+        const i0 = Math.max(0, Math.floor((qrsOn + params.QRS * 0.8) * fs));
+        const i1 = Math.min(N - 1, Math.ceil((stEnd + 0.1) * fs));
+        for (let i = i0; i <= i1; i++) {
+          const tt2 = i / fs;
+          const stShape = (sigST(tt2 - jPoint) - sigST(tt2 - stEnd));
+          // Convex upward (tombstone) ST elevation
+          const convexFactor = Math.exp(-2 * Math.pow((tt2 - (jPoint + stEnd) / 2) / (stEnd - jPoint), 2));
+          const elev = stShape * aElev * (1 + 0.3 * convexFactor);
+          const depr = stShape * aDepr;
+          Vx[i] += elev * dSTElev[0] + depr * dSTDepr[0];
+          Vy[i] += elev * dSTElev[1] + depr * dSTDepr[1];
+          Vz[i] += elev * dSTElev[2] + depr * dSTDepr[2];
+        }
+      }
+
+      // Hyperkalemia: peaked T waves (tall, narrow, symmetric)
+      if (dx === "Hyperkalemia" && !beat.isPVC) {
+        // Enhance T wave with peaked morphology
+        const tPeak = qrsOn + QT * 0.6;
+        const peakedSigma = 0.04; // Narrower than normal
+        const peakedAmp = 0.25 * jitter.ampJitter;
+        // T wave direction follows normal T axis
+        const dTpeaked = axisDir(params.Taxis, params.zT);
+        addGaussian3(Vx, Vy, Vz, fs, tPeak, peakedSigma, peakedAmp, dTpeaked);
+      }
+
+      // Brugada Type 1: coved ST elevation in V1-V2 (right precordial)
+      // Characteristic "shark fin" morphology
+      if (dx === "Brugada (Type 1)" && !beat.isPVC) {
+        const tau = 0.006;
+        // Right precordial direction (V1-V2 positive)
+        const dBrugada = norm([-0.8, -0.1, 0.95]);
+        function sigBrug(tt) {
+          return 0.5 * (1 + Math.tanh(tt / tau));
+        }
+        const jPoint = qrsOn + params.QRS;
+        const covedPeak = jPoint + 0.06;
+        const covedEnd = jPoint + 0.15;
+        const aCoved = 0.22 * jitter.ampJitter;
+        const i0 = Math.max(0, Math.floor(jPoint * fs));
+        const i1 = Math.min(N - 1, Math.ceil((covedEnd + 0.05) * fs));
+        for (let i = i0; i <= i1; i++) {
+          const tt2 = i / fs;
+          // Coved shape: rises then descends into inverted T
+          const rise = sigBrug(tt2 - jPoint);
+          const fall = sigBrug(tt2 - covedPeak);
+          const covedShape = rise * (1 - fall * 1.5) * aCoved;
+          Vx[i] += covedShape * dBrugada[0];
+          Vy[i] += covedShape * dBrugada[1];
+          Vz[i] += covedShape * dBrugada[2];
         }
       }
     }

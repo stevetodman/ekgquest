@@ -53,7 +53,7 @@ const server = createServer(async (req, res) => {
   let pathname = decodeURIComponent(url.pathname);
 
   if (pathname === "/") {
-    pathname = "/viewer/ecg_viewer_unified.html";
+    pathname = "/viewer/ekgquest_lab.html";
   }
 
   const filePath = path.join(ROOT, pathname);
@@ -84,7 +84,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const url = `http://localhost:${PORT}/viewer/ecg_viewer_unified.html`;
+  const url = `http://localhost:${PORT}/viewer/ekgquest_lab.html`;
   console.log(`Serving ${ROOT}`);
   console.log(`Open ${url}`);
   console.log(`Set PORT or HOST env vars to override.`);
