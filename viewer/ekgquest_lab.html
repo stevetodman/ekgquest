@@ -571,6 +571,156 @@
     margin: 20px;
     border-radius: 20px;
   }
+
+  /* ===== Generate from Image Modal ===== */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+  }
+  .modal-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+  .modal-content {
+    background: var(--bg);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--grid);
+  }
+  .modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--fg);
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .modal-close:hover {
+    background: var(--grid);
+    color: var(--fg);
+  }
+  .modal-preview {
+    background: #111;
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .modal-preview img {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 4px;
+  }
+  .modal-preview-label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .modal-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--fg);
+  }
+  .modal-form select,
+  .modal-form input[type="range"] {
+    width: 100%;
+  }
+  .modal-form select {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--grid);
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+  }
+  .modal-range-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .modal-range-row input[type="range"] {
+    flex: 1;
+  }
+  .modal-range-value {
+    min-width: 60px;
+    text-align: right;
+    font-weight: bold;
+    font-size: 14px;
+  }
+  .modal-hr-estimate {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .modal-actions button {
+    flex: 1;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+  }
+  .modal-actions .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .modal-actions .btn-primary:hover {
+    filter: brightness(1.1);
+  }
+  .modal-actions .btn-secondary {
+    background: var(--grid);
+    color: var(--fg);
+  }
+  .modal-actions .btn-secondary:hover {
+    background: var(--muted);
+  }
+  .modal-tip {
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(100,150,255,0.1);
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin-top: 8px;
+  }
 </style>
 </head>
 <body>
@@ -701,8 +851,8 @@
             <option value="20">20 mm/mV</option>
           </select>
         </label>
-        <button id="calibrateBtn" onclick="startCalibration()">Calibrate Grid</button>
-        <button id="digitizeBtn" onclick="digitizeECG()" class="primary">Digitize Trace</button>
+        <button onclick="extractTraceFromImage()" class="primary" title="Auto-extract ECG trace from image">Extract Trace</button>
+        <button id="calibrateBtn" onclick="startCalibration()">Calibrate (for calipers)</button>
         <button onclick="clearUploadedImage()">Clear</button>
         <div id="calibrationStatus" class="hint" style="display:none"></div>
       </div>
@@ -855,7 +1005,7 @@ import {
   physicsChecks, detectRPeaks,
   buildMedianBeat, fiducialsFromMedian, buildFullFiducialsFromMedian,
   computeAxesFromMedian, computeGlobalMeasurements
-} from "./js/ecg-core.js";
+} from "/viewer/js/ecg-core.js";
 
 // Will be imported dynamically when synthesizer is used
 let synthModule = null;
@@ -895,6 +1045,365 @@ let calibrationPoint1 = null;  // First calibration point
 
 const CALIPER_COLORS = ['#1b6dff', '#e91e63', '#4caf50', '#ff9800', '#9c27b0', '#00bcd4'];
 let nextCaliperColor = 0;
+
+// ============================================================================
+// DIGITIZATION SERVICE (Viterbi Backend)
+// ============================================================================
+
+const DIGITIZE_API_URL = 'http://localhost:5001/api/digitize';
+const CALIBRATE_API_URL = 'http://localhost:5001/api/calibrate';
+let digitizeBackendAvailable = false;
+
+// Check if digitization backend is available
+async function checkDigitizeBackend() {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+    const response = await fetch('http://localhost:5001/api/health', {
+      method: 'GET',
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      digitizeBackendAvailable = true;
+      console.log('Enhanced digitization backend available (Viterbi algorithm)');
+      return true;
+    }
+  } catch (e) {
+    digitizeBackendAvailable = false;
+    console.log('Digitization backend not available, using client-side extraction');
+  }
+  return false;
+}
+
+// Check backend on page load
+checkDigitizeBackend();
+
+/**
+ * Detect grid spacing from an ECG image using autocorrelation.
+ * Works with any grid color (red, green, blue, gray).
+ */
+function detectGridSpacing(img) {
+  // Create canvas to analyze image
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data, width, height } = imageData;
+
+  // Convert to grayscale and detect edges
+  const gray = new Float32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      gray[y * width + x] = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    }
+  }
+
+  // Compute vertical edge strength (for detecting vertical grid lines)
+  const edgeStrength = new Float32Array(width);
+  for (let x = 1; x < width - 1; x++) {
+    let sum = 0;
+    for (let y = 0; y < height; y++) {
+      const idx = y * width + x;
+      const diff = Math.abs(gray[idx + 1] - gray[idx - 1]);
+      sum += diff;
+    }
+    edgeStrength[x] = sum;
+  }
+
+  // Normalize edge strength
+  const maxEdge = Math.max(...edgeStrength);
+  if (maxEdge < 1) return null;
+  for (let i = 0; i < edgeStrength.length; i++) {
+    edgeStrength[i] /= maxEdge;
+  }
+
+  // Autocorrelation to find periodicity
+  const maxLag = Math.min(200, Math.floor(width / 4));
+  const autocorr = new Float32Array(maxLag);
+
+  const mean = edgeStrength.reduce((a, b) => a + b, 0) / edgeStrength.length;
+  for (let lag = 0; lag < maxLag; lag++) {
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < edgeStrength.length - lag; i++) {
+      sum += (edgeStrength[i] - mean) * (edgeStrength[i + lag] - mean);
+      count++;
+    }
+    autocorr[lag] = sum / count;
+  }
+
+  // Normalize autocorrelation
+  const ac0 = autocorr[0];
+  if (ac0 < 1e-6) return null;
+  for (let i = 0; i < autocorr.length; i++) {
+    autocorr[i] /= ac0;
+  }
+
+  // Find first significant peak (skip lag 0)
+  const minSpacing = 8;  // Minimum expected grid spacing in pixels
+  let bestPeak = null;
+  let bestHeight = 0.15;  // Minimum peak height threshold
+
+  for (let i = minSpacing; i < autocorr.length - 1; i++) {
+    if (autocorr[i] > autocorr[i - 1] &&
+        autocorr[i] > autocorr[i + 1] &&
+        autocorr[i] > bestHeight) {
+      // Sub-pixel refinement via quadratic interpolation
+      const y0 = autocorr[i - 1];
+      const y1 = autocorr[i];
+      const y2 = autocorr[i + 1];
+      const denom = y0 - 2 * y1 + y2;
+      let peakPos = i;
+      if (Math.abs(denom) > 1e-10) {
+        peakPos = i + 0.5 * (y0 - y2) / denom;
+      }
+
+      bestPeak = peakPos;
+      bestHeight = autocorr[i];
+      break;  // Take first significant peak
+    }
+  }
+
+  if (bestPeak === null) return null;
+
+  // Grid spacing = pixels per small box (1mm)
+  // Confidence based on peak height
+  const confidence = Math.min(1.0, bestHeight * 1.5);
+
+  return {
+    pxPerMm: bestPeak,
+    confidence: confidence
+  };
+}
+
+/**
+ * Digitize ECG image using the Viterbi backend (enhanced mode).
+ */
+async function digitizeWithBackend(imageBlob, options = {}) {
+  const {
+    paperSpeed = 25,
+    voltageScale = 10,
+    leadHint = 'II',
+    crop = null
+  } = options;
+
+  if (!imageBlob) {
+    throw new Error('No image blob provided');
+  }
+
+  console.log('Sending image to backend:', imageBlob.size, 'bytes');
+
+  const formData = new FormData();
+  formData.append('image', imageBlob, 'ecg.png');
+  formData.append('paper_speed', paperSpeed.toString());
+  formData.append('voltage_scale', voltageScale.toString());
+  formData.append('lead_hint', leadHint);
+  if (crop) {
+    formData.append('crop', JSON.stringify(crop));
+  }
+
+  const response = await fetch(DIGITIZE_API_URL, {
+    method: 'POST',
+    body: formData
+  });
+
+  const responseData = await response.json().catch(() => ({ error: 'Failed to parse response' }));
+
+  if (!response.ok) {
+    console.error('Digitization error:', responseData);
+    throw new Error(responseData.error || `Server error: ${response.status}`);
+  }
+
+  console.log('Digitization result:', responseData);
+  return responseData;
+}
+
+/**
+ * Convert uploaded image to blob for sending to backend.
+ */
+function imageToBlob(img) {
+  return new Promise((resolve, reject) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width || img.naturalWidth;
+      canvas.height = img.height || img.naturalHeight;
+
+      if (canvas.width === 0 || canvas.height === 0) {
+        reject(new Error('Image has zero dimensions'));
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to create blob from image'));
+        }
+      }, 'image/png');
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
+ * Unified digitization function - tries backend first, falls back to client-side.
+ */
+async function digitizeECGImage(img, options = {}) {
+  const {
+    paperSpeed = 25,
+    voltageScale = 10,
+    forceBackend = false,
+    forceClientSide = false
+  } = options;
+
+  // Try backend if available and not forcing client-side
+  if (!forceClientSide && (forceBackend || digitizeBackendAvailable)) {
+    try {
+      showStatus('Digitizing with Viterbi algorithm...', 'info', 0);
+
+      const blob = await imageToBlob(img);
+      const result = await digitizeWithBackend(blob, {
+        paperSpeed,
+        voltageScale,
+        leadHint: 'II'
+      });
+
+      if (result.success) {
+        const leadData = result.leads['II'] || Object.values(result.leads)[0];
+
+        showStatus(
+          `Enhanced digitization: ${result.quality.score > 0.7 ? 'High' : 'Medium'} quality ` +
+          `(${result.metadata.processing_time_ms}ms)`,
+          result.quality.score > 0.7 ? 'success' : 'warning',
+          4000
+        );
+
+        return {
+          method: 'viterbi',
+          fs: leadData.fs,
+          duration_s: leadData.duration_s,
+          leads_uV: buildAllLeadsFromLead2(leadData.samples_uV),
+          quality: result.quality,
+          calibration: result.calibration
+        };
+      }
+    } catch (err) {
+      console.warn('Backend digitization failed:', err.message);
+      if (forceBackend) {
+        throw err;  // Don't fall back if user explicitly requested backend
+      }
+      showStatus('Backend unavailable, using client-side extraction...', 'warning', 2000);
+    }
+  }
+
+  // Fall back to client-side extraction
+  showStatus('Extracting trace (client-side)...', 'info', 0);
+
+  // Use existing extractTraceFromImage logic
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const tracePixels = detectTracePixels(imageData);
+  if (tracePixels.size < 100) {
+    throw new Error('Could not detect trace. Try adjusting image contrast.');
+  }
+
+  const rawPoints = averagingWindowExtract(tracePixels, canvas.width, canvas.height);
+  if (rawPoints.length < 50) {
+    throw new Error('Not enough trace points detected.');
+  }
+
+  // Convert to physical units
+  const pxPerMm = imageCalibration?.pxPerMm || estimatePxPerMm(canvas.width, canvas.height);
+  const mmPerSec = paperSpeed;
+  const mmPerMV = voltageScale;
+
+  const pxPerSec = pxPerMm * mmPerSec;
+  const pxPerMV = pxPerMm * mmPerMV;
+
+  // Find baseline
+  const yValues = rawPoints.map(p => p.y);
+  yValues.sort((a, b) => a - b);
+  const baselineY = yValues[Math.floor(yValues.length / 2)];
+
+  // Convert points to time/voltage
+  const timeVoltage = rawPoints.map(p => ({
+    time: p.x / pxPerSec,
+    voltage: (baselineY - p.y) / pxPerMV
+  }));
+  timeVoltage.sort((a, b) => a.time - b.time);
+
+  // Resample to 500 Hz
+  const fs = 500;
+  const duration = timeVoltage[timeVoltage.length - 1].time;
+  const numSamples = Math.round(duration * fs);
+  const resampled = new Float32Array(numSamples);
+
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / fs;
+    let j = 0;
+    while (j < timeVoltage.length - 1 && timeVoltage[j + 1].time < t) j++;
+
+    if (j >= timeVoltage.length - 1) {
+      resampled[i] = timeVoltage[timeVoltage.length - 1].voltage;
+    } else {
+      const t0 = timeVoltage[j].time, t1 = timeVoltage[j + 1].time;
+      const v0 = timeVoltage[j].voltage, v1 = timeVoltage[j + 1].voltage;
+      const alpha = (t - t0) / (t1 - t0 || 1);
+      resampled[i] = v0 + alpha * (v1 - v0);
+    }
+  }
+
+  // Convert to µV
+  const lead_uV = Array.from(resampled).map(v => v * 1000);
+
+  showStatus(`Client-side extraction: ${rawPoints.length} points → ${duration.toFixed(1)}s`, 'success');
+
+  return {
+    method: 'centroid',
+    fs: fs,
+    duration_s: duration,
+    leads_uV: buildAllLeadsFromLead2(lead_uV),
+    quality: { score: 0.6, issues: ['Client-side extraction - consider using backend for better accuracy'] }
+  };
+}
+
+/**
+ * Build all 12 leads from Lead II data (approximate derivation).
+ */
+function buildAllLeadsFromLead2(lead2_uV) {
+  const leads_uV = { 'II': lead2_uV };
+
+  // Approximate other leads from Lead II
+  leads_uV['I'] = lead2_uV.map(v => v * 0.6);
+  leads_uV['III'] = lead2_uV.map((v, i) => leads_uV['II'][i] - leads_uV['I'][i]);
+  leads_uV['aVR'] = lead2_uV.map((v, i) => -(leads_uV['I'][i] + leads_uV['II'][i]) / 2);
+  leads_uV['aVL'] = lead2_uV.map((v, i) => leads_uV['I'][i] - leads_uV['II'][i] / 2);
+  leads_uV['aVF'] = lead2_uV.map((v, i) => leads_uV['II'][i] - leads_uV['I'][i] / 2);
+  leads_uV['V1'] = lead2_uV.map(v => v * -0.3);
+  leads_uV['V2'] = lead2_uV.map(v => v * -0.1);
+  leads_uV['V3'] = lead2_uV.map(v => v * 0.2);
+  leads_uV['V4'] = lead2_uV.map(v => v * 0.5);
+  leads_uV['V5'] = lead2_uV.map(v => v * 0.7);
+  leads_uV['V6'] = lead2_uV.map(v => v * 0.8);
+
+  return leads_uV;
+}
 
 // ============================================================================
 // STATUS MESSAGES
@@ -1036,7 +1545,7 @@ window.clearReference = function() {
 
 async function ensureSynth() {
   if (!synthModule) {
-    synthModule = await import("./js/ecg-synth-modules.js");
+    synthModule = await import("/viewer/js/ecg-synth-modules.js");
   }
   return synthModule;
 }
@@ -1565,168 +2074,199 @@ function sanitizeFilename(name) {
   return clean || 'ecg_import.png';
 }
 
-// Central function to process any imported image
+// Process imported image - show modal for generating matching synthetic ECG
 function processImportedImage(img, name) {
-  showStatus('Sanitizing image (removing metadata)...', 'info', 0);
-
-  // Sanitize the image first - strips all EXIF/metadata
+  // Sanitize the image (strip EXIF metadata for privacy)
   sanitizeImage(img, (cleanImg) => {
-    // Store only the sanitized version
     uploadedImage = cleanImg;
     uploadedImageName = sanitizeFilename(name);
 
-    // Clear reference to original image
+    // Clear reference to original
     img.src = '';
     img = null;
 
-    // Try auto-calibration
-    const detected = detectGridSpacing(cleanImg);
-    if (detected && detected.confidence > 0.6) {
-      imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto' };
-
-      // Auto-digitize if calibration succeeded
-      showStatus('Digitizing ECG...', 'info', 0);
-      setTimeout(() => {
-        autoDigitizeImage(cleanImg, imageCalibration);
-      }, 50);
-    } else if (detected && detected.confidence > 0.3) {
-      // Medium confidence - try with detected value but warn user
-      imageCalibration = { pxPerMm: detected.pxPerMm, method: 'auto-uncertain' };
-      showStatus('Attempting digitization (uncertain grid detection)...', 'info', 0);
-      setTimeout(() => {
-        autoDigitizeImage(cleanImg, imageCalibration);
-      }, 50);
-    } else {
-      // Low confidence - try common ECG paper sizes as fallback
-      // Standard ECG paper: 25mm/s, 10mm/mV, common DPIs: 72, 96, 150, 300
-      const fallbackCalibrations = [
-        { pxPerMm: 300/25.4, desc: '300 DPI' },  // ~11.8 px/mm
-        { pxPerMm: 150/25.4, desc: '150 DPI' },  // ~5.9 px/mm
-        { pxPerMm: 96/25.4, desc: '96 DPI' },    // ~3.8 px/mm
-        { pxPerMm: cleanImg.width / 250, desc: 'width-based' } // Assume 10 seconds = 250mm
-      ];
-
-      // Try each fallback and pick the one that produces the best trace
-      let bestResult = null;
-      let bestScore = 0;
-
-      for (const fallback of fallbackCalibrations) {
-        try {
-          const testCalibration = { pxPerMm: fallback.pxPerMm, method: 'fallback-' + fallback.desc };
-          const extracted = extractWaveformFromImage(cleanImg, testCalibration);
-
-          if (extracted && Object.keys(extracted.leads_uV).length > 0) {
-            const mainLead = extracted.leads_uV['II'] || Object.values(extracted.leads_uV)[0];
-            if (mainLead && mainLead.length > 100) {
-              // Score based on signal characteristics
-              const range = Math.max(...mainLead) - Math.min(...mainLead);
-              const score = (range > 200 && range < 10000) ? range : 0;
-
-              if (score > bestScore) {
-                bestScore = score;
-                bestResult = { calibration: testCalibration, extracted };
-              }
-            }
-          }
-        } catch (e) {
-          // Continue trying other fallbacks
-        }
-      }
-
-      if (bestResult && bestScore > 300) {
-        // Use the best fallback result
-        imageCalibration = bestResult.calibration;
-        showStatus('Auto-calibrating with fallback strategy...', 'info', 0);
-        setTimeout(() => {
-          autoDigitizeImage(cleanImg, imageCalibration);
-        }, 50);
-      } else {
-        // No good fallback - go to manual mode
-        imageMode = true;
-        imageCalibration = null;
-        document.getElementById('calibrationControls').style.display = 'block';
-        document.getElementById('caseInfo').textContent = uploadedImageName;
-        showStatus('Manual calibration needed - click two grid points 5mm apart', 'info');
-        redraw();
-      }
-    }
+    // Show the generate modal with the image preview
+    openGenerateModal(cleanImg);
   });
 }
 
-// Auto-digitize image to waveform data
-function autoDigitizeImage(img, calibration) {
-  try {
-    const extracted = extractWaveformFromImage(img, calibration);
+// ============================================================================
+// GENERATE FROM IMAGE MODAL
+// ============================================================================
 
-    if (!extracted || Object.keys(extracted.leads_uV).length === 0) {
-      // Fall back to image mode
-      imageMode = true;
-      document.getElementById('calibrationControls').style.display = 'block';
-      showStatus('Could not extract trace - showing as image', 'warning');
-      redraw();
-      return;
+let modalImageRef = null;
+
+// Age to expected HR mapping (simplified from PEDIATRIC_PRIORS)
+function getExpectedHR(age) {
+  if (age < 1) return 140;
+  if (age < 3) return 115;
+  if (age < 6) return 100;
+  if (age < 12) return 85;
+  if (age < 18) return 75;
+  return 70;
+}
+
+window.openGenerateModal = function(img) {
+  modalImageRef = img;
+
+  // Set preview image
+  const previewImg = document.getElementById('modalPreviewImg');
+  previewImg.src = img.src;
+
+  // Reset form to defaults
+  document.getElementById('modalDx').value = 'Normal sinus';
+  document.getElementById('modalAge').value = 45;
+  updateModalAgeDisplay();
+
+  // Show modal
+  document.getElementById('generateModal').classList.add('visible');
+};
+
+window.closeGenerateModal = function(event) {
+  // If called from overlay click, only close if clicking the overlay itself
+  if (event && event.target !== event.currentTarget) return;
+
+  document.getElementById('generateModal').classList.remove('visible');
+  modalImageRef = null;
+};
+
+window.updateModalAgeDisplay = function() {
+  const age = parseInt(document.getElementById('modalAge').value);
+  document.getElementById('modalAgeValue').textContent = age + ' yrs';
+
+  const hr = getExpectedHR(age);
+  document.getElementById('modalHREstimate').textContent = `Expected HR: ~${hr} bpm`;
+};
+
+window.generateFromModal = async function() {
+  const age = parseInt(document.getElementById('modalAge').value);
+  const dx = document.getElementById('modalDx').value;
+  const seed = Math.floor(Math.random() * 99999) + 1;
+
+  // Close modal
+  closeGenerateModal();
+
+  // Clear image mode state
+  uploadedImage = null;
+  imageMode = false;
+  document.getElementById('calibrationControls').style.display = 'none';
+
+  // Update main form to match modal selections
+  document.getElementById('ageYears').value = age;
+  document.getElementById('dx').value = dx;
+  document.getElementById('seed').value = seed;
+
+  // Generate the ECG
+  showStatus('Generating matching ECG...', 'info', 0);
+
+  const synth = await ensureSynth();
+  const noiseEnabled = document.getElementById('noise').checked;
+  const filtersEnabled = document.getElementById('filters').checked;
+
+  ecgData = synth.synthECGModular(age, dx, seed, {
+    sex: null,
+    enableNoise: noiseEnabled,
+    enableFilters: filtersEnabled,
+    artifactParams: noiseEnabled ? synth.ARTIFACT_PRESETS.typical : synth.ARTIFACT_PRESETS.none,
+    deviceParams: filtersEnabled ? synth.DEVICE_PRESETS.diagnostic : synth.DEVICE_PRESETS.raw
+  });
+
+  // Mark as inspired by uploaded image
+  ecgData.targets.source = 'generated_from_image';
+
+  updateAfterLoad();
+  showStatus(`Generated ${dx} ECG (age ${age}) - perfect signal fidelity for measurements!`, 'success', 5000);
+};
+
+window.digitizeFromModal = async function() {
+  if (!modalImageRef) {
+    showStatus('No image to digitize', 'error');
+    return;
+  }
+
+  // Save reference before closing modal (which clears modalImageRef)
+  const imageToDigitize = modalImageRef;
+
+  console.log('Digitizing image:', imageToDigitize.width, 'x', imageToDigitize.height);
+
+  const dx = document.getElementById('modalDx').value;
+  const age = parseInt(document.getElementById('modalAge').value);
+
+  // Close modal (this sets modalImageRef = null)
+  closeGenerateModal();
+
+  try {
+    // Check backend availability first
+    const backendAvailable = await checkDigitizeBackend();
+    console.log('Backend available:', backendAvailable);
+
+    if (!backendAvailable) {
+      showStatus('Digitization service not running. Using client-side extraction...', 'warning', 3000);
     }
 
-    // Fill in missing leads
-    const leads = fillMissingLeads(extracted.leads_uV);
+    // Digitize the image
+    const result = await digitizeECGImage(imageToDigitize, {
+      paperSpeed: 25,
+      voltageScale: 10
+    });
 
-    // Create full ECG data structure (no traceable metadata)
+    console.log('Digitization result:', result);
+
+    // Build ECG data structure
     ecgData = {
-      schema_version: '1.0',
-      fs: extracted.fs,
-      duration_s: extracted.duration_s,
-      leads_uV: leads,
+      fs: result.fs,
+      duration_s: result.duration_s,
+      leads_uV: result.leads_uV,
       targets: {
         synthetic: false,
-        imported: true,
-        source: 'digitized',
-        dx: 'Imported ECG'
-        // Note: No filename, timestamps, or other traceable data stored
+        digitized: true,
+        source: uploadedImageName || 'uploaded_image',
+        digitization_method: result.method,
+        dx: dx,
+        ageY: age
       },
       integrity: {
-        format: 'auto_digitized',
-        method: calibration.method
+        digitization_quality: result.quality?.score || 0.5,
+        digitization_issues: result.quality?.issues || []
       }
     };
 
-    // Calculate quality score
-    const leadCount = Object.keys(extracted.leads_uV).length;
-    const sampleCount = Object.values(extracted.leads_uV)[0]?.length || 0;
-    const hasData = sampleCount > 100;
-
-    // Check for reasonable signal (not flat, not noise)
-    const mainLead = leads['II'] || Object.values(leads)[0];
-    const signalRange = Math.max(...mainLead) - Math.min(...mainLead);
-    const signalQuality = signalRange > 200 && signalRange < 10000 ? 'good' : 'uncertain';
-
-    // Switch to waveform mode (not image mode)
-    imageMode = false;
+    // Clear image state
     uploadedImage = null;
+    imageMode = false;
     document.getElementById('calibrationControls').style.display = 'none';
 
-    // Update UI with quality info
+    // Update UI
     updateAfterLoad();
 
-    if (signalQuality === 'good') {
-      showStatus(`ECG digitized (${leadCount} lead${leadCount > 1 ? 's' : ''}, ${(extracted.duration_s).toFixed(1)}s). Works like a generated ECG!`, 'success');
-    } else {
-      showStatus(`ECG digitized but quality uncertain. Verify measurements manually.`, 'warning');
-    }
+    // Update source badge
+    const badge = document.getElementById('sourceBadge');
+    badge.textContent = 'DIGITIZED';
+    badge.className = 'header-badge badge-import';
+
+    const qualityText = result.quality?.score > 0.7 ? 'High' : result.quality?.score > 0.5 ? 'Medium' : 'Low';
+    showStatus(
+      `Digitized ECG: ${qualityText} quality (${result.method === 'viterbi' ? 'Viterbi' : 'Client-side'})`,
+      result.quality?.score > 0.5 ? 'success' : 'warning',
+      5000
+    );
 
   } catch (err) {
-    console.error('Digitization error:', err);
-    imageMode = true;
-    document.getElementById('calibrationControls').style.display = 'block';
-    showStatus('Digitization failed - showing as image', 'warning');
-    redraw();
+    console.error('Digitization failed:', err);
+    showStatus('Digitization failed: ' + err.message, 'error');
   }
-}
+};
 
 // Fill in missing leads from available leads
 function fillMissingLeads(leads_uV) {
-  const LEAD_NAMES = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+  // Standard 12 leads + pediatric leads (V3R, V4R, V7, V8, V9)
+  const STANDARD_LEADS = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+  const PEDIATRIC_LEADS = ['V3R', 'V4R', 'V7', 'V8', 'V9'];
   const filled = { ...leads_uV };
   const sampleCount = Object.values(leads_uV)[0]?.length || 5000;
+
+  // Check if this is a pediatric ECG (has any right-sided or posterior leads)
+  const hasPediatricLeads = PEDIATRIC_LEADS.some(lead => lead in filled);
 
   // If we have Lead II, use it as the basis
   const baseLead = filled['II'] || filled['I'] || Object.values(filled)[0];
@@ -1776,10 +2316,39 @@ function fillMissingLeads(leads_uV) {
     }
   }
 
-  // Ensure all leads exist
-  for (const lead of LEAD_NAMES) {
+  // Fill pediatric leads (right-sided V3R/V4R are roughly inverted V3/V4)
+  // V7/V8/V9 are posterior leads, approximate from V6
+  if (hasPediatricLeads) {
+    if (!('V3R' in filled) && filled['V3']) {
+      filled['V3R'] = filled['V3'].map(v => -v * 0.7); // Right-sided, inverted
+    }
+    if (!('V4R' in filled) && filled['V4']) {
+      filled['V4R'] = filled['V4'].map(v => -v * 0.6); // Right-sided, inverted
+    }
+    if (!('V7' in filled) && filled['V6']) {
+      filled['V7'] = filled['V6'].map(v => v * 0.8); // Posterior continuation
+    }
+    if (!('V8' in filled) && filled['V6']) {
+      filled['V8'] = filled['V6'].map(v => v * 0.6);
+    }
+    if (!('V9' in filled) && filled['V6']) {
+      filled['V9'] = filled['V6'].map(v => v * 0.4);
+    }
+  }
+
+  // Ensure standard 12 leads exist (always required)
+  for (const lead of STANDARD_LEADS) {
     if (!(lead in filled)) {
       filled[lead] = new Array(sampleCount).fill(0);
+    }
+  }
+
+  // Only include pediatric leads if any were extracted
+  if (hasPediatricLeads) {
+    for (const lead of PEDIATRIC_LEADS) {
+      if (!(lead in filled)) {
+        filled[lead] = new Array(sampleCount).fill(0);
+      }
     }
   }
 
@@ -1868,6 +2437,292 @@ window.startCalibration = function() {
   showStatus('Auto-detection failed. Click two points exactly 5 big boxes apart.', 'info', 0);
   redraw();
 };
+
+// ============================================================================
+// ECG TRACE EXTRACTION (WebPlotDigitizer-style averaging window algorithm)
+// ============================================================================
+
+/**
+ * Extract ECG trace from uploaded image using averaging window algorithm
+ * Based on the approach used by WebPlotDigitizer (AGPL v3)
+ */
+window.extractTraceFromImage = function() {
+  if (!uploadedImage) {
+    showStatus('Upload an image first', 'warning');
+    return;
+  }
+
+  showStatus('Extracting trace...', 'info');
+
+  // Create canvas to get image data
+  const canvas = document.createElement('canvas');
+  canvas.width = uploadedImage.width;
+  canvas.height = uploadedImage.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(uploadedImage, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  try {
+    // Step 1: Detect trace pixels (dark pixels that aren't grid)
+    const tracePixels = detectTracePixels(imageData);
+
+    if (tracePixels.size < 100) {
+      showStatus('Could not detect trace. Try adjusting image contrast.', 'error');
+      return;
+    }
+
+    // Step 2: Run averaging window algorithm
+    const rawPoints = averagingWindowExtract(tracePixels, canvas.width, canvas.height);
+
+    if (rawPoints.length < 50) {
+      showStatus('Extraction failed - not enough trace points detected', 'error');
+      return;
+    }
+
+    // Step 3: Convert to physical units using calibration
+    const pxPerMm = imageCalibration?.pxPerMm || estimatePxPerMm(canvas.width, canvas.height);
+    const mmPerSec = parseFloat(document.getElementById('importSpeed').value) || 25;
+    const mmPerMV = parseFloat(document.getElementById('importGain').value) || 10;
+
+    // Convert pixels to time (seconds) and voltage (mV)
+    const pxPerSec = pxPerMm * mmPerSec;
+    const pxPerMV = pxPerMm * mmPerMV;
+
+    // Find baseline (median y value) for voltage reference
+    const yValues = rawPoints.map(p => p.y);
+    yValues.sort((a, b) => a - b);
+    const baselineY = yValues[Math.floor(yValues.length / 2)];
+
+    // Convert points to time/voltage pairs
+    const timeVoltage = rawPoints.map(p => ({
+      time: p.x / pxPerSec,
+      voltage: (baselineY - p.y) / pxPerMV  // Invert Y (screen coords are top-down)
+    }));
+
+    // Sort by time
+    timeVoltage.sort((a, b) => a.time - b.time);
+
+    // Resample to uniform 500 Hz
+    const fs = 500;
+    const duration = timeVoltage[timeVoltage.length - 1].time;
+    const numSamples = Math.round(duration * fs);
+    const resampled = new Float32Array(numSamples);
+
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / fs;
+      // Find surrounding points for linear interpolation
+      let j = 0;
+      while (j < timeVoltage.length - 1 && timeVoltage[j + 1].time < t) j++;
+
+      if (j >= timeVoltage.length - 1) {
+        resampled[i] = timeVoltage[timeVoltage.length - 1].voltage;
+      } else {
+        const t0 = timeVoltage[j].time, t1 = timeVoltage[j + 1].time;
+        const v0 = timeVoltage[j].voltage, v1 = timeVoltage[j + 1].voltage;
+        const alpha = (t - t0) / (t1 - t0 || 1);
+        resampled[i] = v0 + alpha * (v1 - v0);
+      }
+    }
+
+    // Convert to µV and create leads object
+    const lead_uV = Array.from(resampled).map(v => v * 1000);
+
+    // Create ECG data structure (single lead imported as Lead II)
+    const leads_uV = { 'II': lead_uV };
+
+    // Fill in approximate versions of other leads
+    leads_uV['I'] = lead_uV.map(v => v * 0.6);
+    leads_uV['III'] = lead_uV.map((v, i) => leads_uV['II'][i] - leads_uV['I'][i]);
+    leads_uV['aVR'] = lead_uV.map((v, i) => -(leads_uV['I'][i] + leads_uV['II'][i]) / 2);
+    leads_uV['aVL'] = lead_uV.map((v, i) => leads_uV['I'][i] - leads_uV['II'][i] / 2);
+    leads_uV['aVF'] = lead_uV.map((v, i) => leads_uV['II'][i] - leads_uV['I'][i] / 2);
+    leads_uV['V1'] = lead_uV.map(v => v * -0.3);
+    leads_uV['V2'] = lead_uV.map(v => v * -0.1);
+    leads_uV['V3'] = lead_uV.map(v => v * 0.2);
+    leads_uV['V4'] = lead_uV.map(v => v * 0.5);
+    leads_uV['V5'] = lead_uV.map(v => v * 0.7);
+    leads_uV['V6'] = lead_uV.map(v => v * 0.8);
+
+    // Set as current ECG data
+    ecgData = {
+      fs: fs,
+      duration_s: duration,
+      leads_uV: leads_uV,
+      targets: {
+        synthetic: false,
+        source: 'image_extraction',
+        filename: uploadedImageName
+      },
+      integrity: {
+        extraction_points: rawPoints.length,
+        resampled_points: numSamples
+      }
+    };
+
+    imageMode = false;
+    uploadedImage = null;
+    document.getElementById('calibrationControls').style.display = 'none';
+
+    updateAfterLoad();
+    showStatus(`Extracted ${rawPoints.length} points → ${duration.toFixed(1)}s ECG at 500 Hz`, 'success');
+
+  } catch (err) {
+    console.error('Extraction error:', err);
+    showStatus('Extraction failed: ' + err.message, 'error');
+  }
+};
+
+/**
+ * Detect trace pixels (foreground) vs background/grid
+ * Returns Set of pixel indices that are part of the trace
+ */
+function detectTracePixels(imageData) {
+  const { data, width, height } = imageData;
+  const tracePixels = new Set();
+
+  // Grid colors to exclude (red, pink, green, blue variations)
+  const isGridColor = (r, g, b) => {
+    // Red/pink grid lines
+    if (r > 150 && r > g * 1.3 && r > b * 1.3) return true;
+    // Green grid lines
+    if (g > 150 && g > r * 1.3 && g > b * 1.2) return true;
+    // Blue grid lines
+    if (b > 150 && b > r * 1.3 && b > g * 1.2) return true;
+    // Light pink/salmon
+    if (r > 200 && g > 150 && g < 220 && b > 150 && b < 220) return true;
+    return false;
+  };
+
+  // Calculate brightness threshold for trace detection
+  // Trace is typically the darkest element
+  let brightnessHist = new Array(256).fill(0);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (!isGridColor(r, g, b)) {
+      const brightness = Math.round((r + g + b) / 3);
+      brightnessHist[brightness]++;
+    }
+  }
+
+  // Find the darkest significant peak (trace pixels)
+  // Look for threshold where we capture trace but not background
+  let threshold = 80; // Default
+  let cumulative = 0;
+  const totalPixels = (data.length / 4);
+
+  for (let i = 0; i < 256; i++) {
+    cumulative += brightnessHist[i];
+    // Trace typically occupies 0.5-5% of non-grid pixels
+    if (cumulative > totalPixels * 0.005 && cumulative < totalPixels * 0.15) {
+      threshold = i;
+      break;
+    }
+  }
+
+  // Collect trace pixels
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+
+      // Skip grid colors
+      if (isGridColor(r, g, b)) continue;
+
+      // Check if dark enough to be trace
+      const brightness = (r + g + b) / 3;
+      if (brightness <= threshold) {
+        tracePixels.add(y * width + x);
+      }
+    }
+  }
+
+  return tracePixels;
+}
+
+/**
+ * Averaging Window Algorithm for trace extraction
+ * Scans columns, groups vertically-adjacent trace pixels, averages positions
+ */
+function averagingWindowExtract(tracePixels, width, height, xStep = 2, yStep = 5) {
+  const points = [];
+
+  // For each column, find trace pixels and average their y-positions
+  for (let x = 0; x < width; x++) {
+    let blobs = [];
+    let currentBlob = null;
+
+    // Scan vertically for trace pixels
+    for (let y = 0; y < height; y++) {
+      const idx = y * width + x;
+      if (tracePixels.has(idx)) {
+        if (currentBlob === null || y > currentBlob.lastY + yStep) {
+          // Start new blob
+          if (currentBlob !== null) blobs.push(currentBlob);
+          currentBlob = { sumY: y, count: 1, lastY: y };
+        } else {
+          // Extend current blob
+          currentBlob.sumY += y;
+          currentBlob.count++;
+          currentBlob.lastY = y;
+        }
+      }
+    }
+    if (currentBlob !== null) blobs.push(currentBlob);
+
+    // Add points for each blob (use center of blob)
+    for (const blob of blobs) {
+      points.push({
+        x: x + 0.5,
+        y: blob.sumY / blob.count + 0.5,
+        weight: blob.count
+      });
+    }
+  }
+
+  // Merge nearby points using xStep window
+  const mergedPoints = [];
+  const used = new Set();
+
+  for (let i = 0; i < points.length; i++) {
+    if (used.has(i)) continue;
+
+    let sumX = points[i].x;
+    let sumY = points[i].y;
+    let count = 1;
+
+    // Find nearby points to merge
+    for (let j = i + 1; j < points.length; j++) {
+      if (used.has(j)) continue;
+      if (points[j].x > points[i].x + xStep * 2) break;
+
+      if (Math.abs(points[j].x - points[i].x) <= xStep &&
+          Math.abs(points[j].y - points[i].y) <= yStep) {
+        sumX += points[j].x;
+        sumY += points[j].y;
+        count++;
+        used.add(j);
+      }
+    }
+
+    used.add(i);
+    mergedPoints.push({ x: sumX / count, y: sumY / count });
+  }
+
+  return mergedPoints;
+}
+
+/**
+ * Estimate pixels per mm if no calibration available
+ * Based on typical ECG paper dimensions
+ */
+function estimatePxPerMm(imageWidth, imageHeight) {
+  // Standard 12-lead ECG is ~250mm wide at 25mm/s for 10s
+  // Estimate based on typical image sizes
+  if (imageWidth > 2000) return 8;   // High-res scan
+  if (imageWidth > 1000) return 4;   // Medium res
+  return 2;  // Low res
+}
 
 // Parse CSV from WebPlotDigitizer or similar tools
 function parseCSVtoECG(csvText, filename) {
@@ -2094,800 +2949,6 @@ function parseCSVtoECG(csvText, filename) {
     showStatus('Failed to parse CSV: ' + err.message, 'error');
     return null;
   }
-}
-
-// Automatic grid detection using FFT-like frequency analysis
-function detectGridSpacing(img) {
-  try {
-    // Create a canvas to analyze the image
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    // Use a reasonable size for analysis
-    const maxSize = 800;
-    const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-    canvas.width = img.width * scale;
-    canvas.height = img.height * scale;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-
-    // Detect red/pink grid lines (ECG paper is typically red grid)
-    // We'll look for horizontal lines and measure their spacing
-    const rowRedness = [];
-    const colRedness = [];
-
-    // Calculate "redness" for each row and column
-    for (let y = 0; y < canvas.height; y++) {
-      let rowSum = 0;
-      for (let x = 0; x < canvas.width; x++) {
-        const i = (y * canvas.width + x) * 4;
-        const r = data[i], g = data[i+1], b = data[i+2];
-        // Red-ish pixels (more red than green/blue)
-        if (r > 100 && r > g * 1.2 && r > b * 1.2) {
-          rowSum++;
-        }
-      }
-      rowRedness.push(rowSum);
-    }
-
-    for (let x = 0; x < canvas.width; x++) {
-      let colSum = 0;
-      for (let y = 0; y < canvas.height; y++) {
-        const i = (y * canvas.width + x) * 4;
-        const r = data[i], g = data[i+1], b = data[i+2];
-        if (r > 100 && r > g * 1.2 && r > b * 1.2) {
-          colSum++;
-        }
-      }
-      colRedness.push(colSum);
-    }
-
-    // Find peaks in the redness arrays (these are grid lines)
-    const findPeaks = (arr, threshold) => {
-      const peaks = [];
-      const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-      const thresh = mean * threshold;
-
-      for (let i = 2; i < arr.length - 2; i++) {
-        if (arr[i] > thresh &&
-            arr[i] > arr[i-1] && arr[i] > arr[i+1] &&
-            arr[i] > arr[i-2] && arr[i] > arr[i+2]) {
-          peaks.push(i);
-        }
-      }
-      return peaks;
-    };
-
-    const verticalPeaks = findPeaks(colRedness, 1.5);
-
-    if (verticalPeaks.length < 5) {
-      return null; // Not enough grid lines detected
-    }
-
-    // Calculate spacings between consecutive peaks
-    const spacings = [];
-    for (let i = 1; i < verticalPeaks.length; i++) {
-      spacings.push(verticalPeaks[i] - verticalPeaks[i-1]);
-    }
-
-    // Find the most common spacing (mode)
-    const spacingCounts = {};
-    spacings.forEach(s => {
-      // Round to nearest 2 pixels for grouping
-      const rounded = Math.round(s / 2) * 2;
-      spacingCounts[rounded] = (spacingCounts[rounded] || 0) + 1;
-    });
-
-    let bestSpacing = 0;
-    let bestCount = 0;
-    for (const [spacing, count] of Object.entries(spacingCounts)) {
-      if (count > bestCount) {
-        bestCount = count;
-        bestSpacing = parseInt(spacing);
-      }
-    }
-
-    if (bestSpacing < 5 || bestCount < 3) {
-      return null; // Spacing too small or inconsistent
-    }
-
-    // Determine if this is 1mm or 5mm grid spacing
-    // Standard ECG: 1mm = 0.04s at 25mm/s, 5mm = 0.2s (big box)
-    // Check if there's a 5x multiple pattern
-    const smallSpacing = bestSpacing;
-
-    // Assume detected spacing is 1mm small boxes
-    // Convert to pixels per mm (accounting for image scaling)
-    const pxPerMm = smallSpacing / scale;
-
-    // Confidence based on consistency of spacing detection
-    const variance = spacings.reduce((sum, s) => sum + Math.pow(s - bestSpacing, 2), 0) / spacings.length;
-    const stdDev = Math.sqrt(variance);
-    const confidence = Math.max(0, 1 - (stdDev / bestSpacing));
-
-    return {
-      pxPerMm: pxPerMm,
-      smallBoxPx: smallSpacing,
-      bigBoxPx: smallSpacing * 5,
-      confidence: confidence,
-      gridLines: verticalPeaks.length
-    };
-
-  } catch (err) {
-    console.error('Grid detection failed:', err);
-    return null;
-  }
-}
-
-// Digitize ECG trace from uploaded image
-window.digitizeECG = async function() {
-  if (!imageMode || !uploadedImage) {
-    showStatus('Upload an image first', 'warning');
-    return;
-  }
-
-  // Need calibration for accurate digitization
-  if (!imageCalibration?.calibrated) {
-    showStatus('Please calibrate the grid first for accurate digitization', 'warning');
-    startCalibration();
-    return;
-  }
-
-  showStatus('Digitizing ECG trace...', 'info', 0);
-
-  try {
-    // Small delay to let the UI update
-    await new Promise(r => setTimeout(r, 50));
-
-    const result = extractWaveformFromImage(uploadedImage, imageCalibration);
-
-    if (!result || !result.leads_uV || Object.keys(result.leads_uV).length === 0) {
-      showStatus('Could not detect ECG trace. Try a clearer image.', 'error');
-      return;
-    }
-
-    // Create ECG data structure matching synthetic format
-    ecgData = {
-      fs: result.fs,
-      duration_s: result.duration_s,
-      leads_uV: result.leads_uV,
-      targets: {
-        synthetic: false,
-        digitized: true,
-        source: uploadedImageName,
-        age_years: null,
-        sex: null,
-        dx: 'Digitized from image'
-      },
-      integrity: {
-        digitization_method: 'trace_extraction',
-        source_pxPerMm: imageCalibration.pxPerMm,
-        source_paperSpeed: parseInt(document.getElementById('importSpeed').value),
-        source_gain: parseInt(document.getElementById('importGain').value)
-      }
-    };
-
-    // Exit image mode - now it's a real ECG
-    imageMode = false;
-    uploadedImage = null;
-    document.getElementById('calibrationControls').style.display = 'none';
-    document.getElementById('imageInput').value = '';
-
-    // Run standard ECG analysis
-    updateAfterLoad();
-
-    const leadCount = Object.keys(result.leads_uV).length;
-    showStatus(`Digitized ${leadCount} lead(s) — now a full ECG!`, 'success');
-
-  } catch (err) {
-    console.error('Digitization failed:', err);
-    showStatus('Digitization failed: ' + err.message, 'error');
-  }
-};
-
-function extractWaveformFromImage(img, calibration) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-
-  canvas.width = img.width;
-  canvas.height = img.height;
-  ctx.drawImage(img, 0, 0);
-
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  const width = canvas.width;
-  const height = canvas.height;
-
-  const pxPerMm = calibration.pxPerMm;
-  const paperSpeed = parseInt(document.getElementById('importSpeed').value); // mm/s
-  const gain = parseInt(document.getElementById('importGain').value); // mm/mV
-
-  // Detect and mask watermarks
-  const watermarkInfo = detectWatermarks(data, width, height);
-  const watermarkMask = watermarkInfo.mask;
-
-  // Detect image inversion (dark background)
-  const avgBrightness = calculateAverageBrightness(data, width, height);
-  const isInverted = avgBrightness < 128;
-
-  // If inverted, invert the image for processing
-  if (isInverted) {
-    for (let i = 0; i < data.length; i += 4) {
-      data[i] = 255 - data[i];
-      data[i + 1] = 255 - data[i + 1];
-      data[i + 2] = 255 - data[i + 2];
-    }
-  }
-
-  // Detect lead regions (horizontal bands where traces are)
-  const leadRegions = detectLeadRegions(data, width, height);
-
-  if (leadRegions.length === 0) {
-    // Fall back to single lead using full image
-    leadRegions.push({ y1: 0, y2: height, label: 'II' });
-  }
-
-  const leads_uV = {};
-  const fs = 500; // Output sample rate
-
-  // Process each lead region
-  for (const region of leadRegions) {
-    const trace = extractTraceFromRegion(data, width, height, region.y1, region.y2, region.gridColor, region.traceColor, watermarkMask);
-
-    if (trace.length < 10) continue;
-
-    // Convert pixel positions to voltage
-    const centerY = (region.y1 + region.y2) / 2;
-    console.log(`[DEBUG] Region ${region.label}: centerY=${centerY.toFixed(0)}, pxPerMm=${pxPerMm.toFixed(2)}, gain=${gain}`);
-
-    const voltages = trace.map(t => {
-      if (t.y === null) return 0;
-      // y increases downward, voltage increases upward
-      const mm_from_center = (centerY - t.y) / pxPerMm;
-      const mV = mm_from_center / gain;
-      return Math.round(mV * 1000); // Convert to µV
-    });
-
-    const minV = Math.min(...voltages);
-    const maxV = Math.max(...voltages);
-    console.log(`[DEBUG] Voltage range: ${minV} to ${maxV} µV (${maxV - minV} µV range)`);
-
-    // Resample to target sample rate
-    const duration_s = (trace.length / pxPerMm) / paperSpeed;
-    const targetSamples = Math.round(duration_s * fs);
-    const resampled = resampleSignal(voltages, targetSamples);
-
-    // Apply light smoothing to reduce digitization noise
-    const smoothed = smoothSignal(resampled, 3);
-
-    leads_uV[region.label] = smoothed;
-  }
-
-  // If we only got one lead, also create derived leads for compatibility
-  if (Object.keys(leads_uV).length === 1) {
-    const mainLead = Object.values(leads_uV)[0];
-    // Just use the same trace for lead II if that's all we have
-    if (!leads_uV['II']) {
-      leads_uV['II'] = mainLead;
-    }
-  }
-
-  const duration_s = Object.values(leads_uV)[0]?.length / fs || 10;
-
-  return {
-    leads_uV,
-    fs,
-    duration_s
-  };
-}
-
-// Calculate average brightness of image
-function calculateAverageBrightness(data, width, height) {
-  let sum = 0;
-  const step = 10; // Sample every 10th pixel for speed
-  let count = 0;
-  for (let i = 0; i < width * height; i += step) {
-    const idx = i * 4;
-    sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-    count++;
-  }
-  return sum / count;
-}
-
-// Detect watermark regions (light gray text/patterns)
-function detectWatermarks(data, width, height) {
-  // Watermarks are typically:
-  // 1. Consistent gray level (not grid color, not trace color)
-  // 2. Lighter than trace but darker than background
-  // 3. Often horizontal text patterns
-
-  // Build histogram of gray levels
-  const histogram = new Array(256).fill(0);
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * 4;
-    const gray = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
-    histogram[gray]++;
-  }
-
-  // Find background peak (usually 200-255)
-  let bgPeak = 255, bgCount = 0;
-  for (let i = 200; i < 256; i++) {
-    if (histogram[i] > bgCount) {
-      bgCount = histogram[i];
-      bgPeak = i;
-    }
-  }
-
-  // Watermarks are typically 120-180 gray range (between trace and background)
-  // Find any secondary peak in this range
-  let wmPeak = -1, wmCount = 0;
-  for (let i = 120; i < 190; i++) {
-    if (histogram[i] > wmCount && histogram[i] > (width * height) * 0.001) {
-      wmCount = histogram[i];
-      wmPeak = i;
-    }
-  }
-
-  // Create watermark mask if we found a watermark gray level
-  const watermarkMask = new Uint8Array(width * height);
-  if (wmPeak > 0) {
-    const tolerance = 15;
-    for (let i = 0; i < width * height; i++) {
-      const idx = i * 4;
-      const gray = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
-      // Mark pixel as watermark if it's in the watermark gray range
-      // AND it's relatively uniform color (watermarks are usually gray, not colored)
-      const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-      const isGray = Math.abs(r - g) < 30 && Math.abs(g - b) < 30;
-      if (Math.abs(gray - wmPeak) < tolerance && isGray) {
-        watermarkMask[i] = 1;
-      }
-    }
-  }
-
-  return { mask: watermarkMask, wmGray: wmPeak };
-}
-
-// Image preprocessing for better trace extraction
-function preprocessImage(imageData) {
-  const data = imageData.data;
-  const width = imageData.width;
-  const height = imageData.height;
-
-  // Step 1: Convert to grayscale and enhance contrast
-  const gray = new Float32Array(width * height);
-  let minVal = 255, maxVal = 0;
-
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * 4;
-    const val = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-    gray[i] = val;
-    if (val < minVal) minVal = val;
-    if (val > maxVal) maxVal = val;
-  }
-
-  // Step 2: Contrast stretch
-  const range = maxVal - minVal || 1;
-  for (let i = 0; i < gray.length; i++) {
-    gray[i] = ((gray[i] - minVal) / range) * 255;
-  }
-
-  // Step 3: Apply adaptive thresholding for trace detection
-  const windowSize = Math.max(15, Math.floor(width / 50));
-  const enhanced = new Uint8ClampedArray(data.length);
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-
-      // Calculate local mean
-      let sum = 0, count = 0;
-      for (let dy = -windowSize; dy <= windowSize; dy += 2) {
-        for (let dx = -windowSize; dx <= windowSize; dx += 2) {
-          const nx = x + dx, ny = y + dy;
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-            sum += gray[ny * width + nx];
-            count++;
-          }
-        }
-      }
-      const localMean = sum / count;
-
-      // Threshold relative to local mean
-      const idx = i * 4;
-      const val = gray[i];
-      const threshold = localMean - 20; // Pixels darker than local mean - offset
-
-      if (val < threshold) {
-        // Dark pixel - potential trace
-        enhanced[idx] = data[idx];
-        enhanced[idx + 1] = data[idx + 1];
-        enhanced[idx + 2] = data[idx + 2];
-        enhanced[idx + 3] = 255;
-      } else {
-        // Light pixel - background
-        enhanced[idx] = 255;
-        enhanced[idx + 1] = 255;
-        enhanced[idx + 2] = 255;
-        enhanced[idx + 3] = 255;
-      }
-    }
-  }
-
-  return new ImageData(enhanced, width, height);
-}
-
-// Sobel edge detection for trace boundaries
-function applySobelY(gray, width, height) {
-  const edges = new Float32Array(width * height);
-  const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
-
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      let sum = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          sum += gray[(y + dy) * width + (x + dx)] * sobelY[dy + 1][dx + 1];
-        }
-      }
-      edges[y * width + x] = Math.abs(sum);
-    }
-  }
-
-  return edges;
-}
-
-// Find baseline (isoelectric line) for better voltage reference
-function findBaseline(trace, regionHeight) {
-  // Use histogram of y-values to find most common level
-  const histogram = new Array(regionHeight).fill(0);
-
-  for (const pt of trace) {
-    if (pt.y !== null) {
-      const bin = Math.floor(pt.y) % regionHeight;
-      if (bin >= 0 && bin < regionHeight) {
-        histogram[bin]++;
-      }
-    }
-  }
-
-  // Find the peak (most common y-value = baseline)
-  let maxCount = 0, baselineY = regionHeight / 2;
-  for (let i = 0; i < histogram.length; i++) {
-    if (histogram[i] > maxCount) {
-      maxCount = histogram[i];
-      baselineY = i;
-    }
-  }
-
-  return baselineY;
-}
-
-// Detect grid color (red, orange, green, blue, or gray)
-function detectGridColor(data, width, height) {
-  const colorCounts = { red: 0, orange: 0, green: 0, blue: 0, gray: 0 };
-
-  // Sample pixels across the image
-  for (let y = 0; y < height; y += 5) {
-    for (let x = 0; x < width; x += 5) {
-      const i = (y * width + x) * 4;
-      const r = data[i], g = data[i+1], b = data[i+2];
-      const brightness = (r + g + b) / 3;
-
-      // Skip very dark or very light pixels
-      if (brightness < 50 || brightness > 230) continue;
-
-      // Classify by dominant color
-      if (r > g * 1.4 && r > b * 1.4 && r > 120) colorCounts.red++;
-      else if (r > 150 && g > 100 && g < r && b < 100) colorCounts.orange++;
-      else if (g > r * 1.2 && g > b * 1.2 && g > 100) colorCounts.green++;
-      else if (b > r * 1.2 && b > g * 1.1 && b > 100) colorCounts.blue++;
-      else if (Math.abs(r - g) < 20 && Math.abs(g - b) < 20) colorCounts.gray++;
-    }
-  }
-
-  // Return dominant grid color
-  return Object.entries(colorCounts).reduce((a, b) => a[1] > b[1] ? a : b)[0];
-}
-
-// Detect trace color (usually black, but can be blue, green, etc.)
-function detectTraceColor(data, width, height, gridColor) {
-  const candidates = [];
-
-  // Sample dark pixels
-  for (let y = 0; y < height; y += 3) {
-    for (let x = 0; x < width; x += 3) {
-      const i = (y * width + x) * 4;
-      const r = data[i], g = data[i+1], b = data[i+2];
-      const brightness = (r + g + b) / 3;
-
-      // Look for dark pixels that aren't grid
-      if (brightness > 100) continue;
-
-      // Skip grid-colored pixels
-      if (gridColor === 'red' && r > g * 1.3) continue;
-      if (gridColor === 'green' && g > r * 1.2) continue;
-      if (gridColor === 'blue' && b > r * 1.2 && b > g * 1.1) continue;
-
-      candidates.push({ r, g, b });
-    }
-  }
-
-  if (candidates.length === 0) return { type: 'black' };
-
-  // Analyze trace color
-  const avgR = candidates.reduce((s, c) => s + c.r, 0) / candidates.length;
-  const avgG = candidates.reduce((s, c) => s + c.g, 0) / candidates.length;
-  const avgB = candidates.reduce((s, c) => s + c.b, 0) / candidates.length;
-
-  if (avgB > avgR * 1.3 && avgB > avgG * 1.1) return { type: 'blue', r: avgR, g: avgG, b: avgB };
-  if (avgG > avgR * 1.2 && avgG > avgB * 1.2) return { type: 'green', r: avgR, g: avgG, b: avgB };
-  return { type: 'black' };
-}
-
-// Check if a pixel is a trace pixel
-function isTracePixel(r, g, b, gridColor, traceColor) {
-  const brightness = (r + g + b) / 3;
-
-  // Grid exclusion based on detected grid color
-  if (gridColor === 'red' && r > 100 && r > g * 1.3 && r > b * 1.3) return false;
-  if (gridColor === 'orange' && r > 120 && g > 80 && r > b * 1.5) return false;
-  if (gridColor === 'green' && g > 100 && g > r * 1.2 && g > b * 1.2) return false;
-  if (gridColor === 'blue' && b > 120 && b > r * 1.2) return false;
-  if (gridColor === 'gray' && Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && brightness > 150) return false;
-
-  // Trace detection based on detected trace color
-  if (traceColor.type === 'black') {
-    return brightness < 100;
-  } else if (traceColor.type === 'blue') {
-    return b > 50 && b > r && brightness < 150;
-  } else if (traceColor.type === 'green') {
-    return g > 50 && g > r && g > b && brightness < 150;
-  }
-
-  return brightness < 80;
-}
-
-function detectLeadRegions(data, width, height) {
-  const gridColor = detectGridColor(data, width, height);
-  const traceColor = detectTraceColor(data, width, height, gridColor);
-
-  // Scan for horizontal bands with trace activity
-  const rowActivity = [];
-  for (let y = 0; y < height; y++) {
-    let traceCount = 0;
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4;
-      if (isTracePixel(data[i], data[i+1], data[i+2], gridColor, traceColor)) {
-        traceCount++;
-      }
-    }
-    rowActivity.push(traceCount);
-  }
-
-  // Smooth the activity signal
-  const smoothed = [];
-  const windowSize = 5;
-  for (let i = 0; i < rowActivity.length; i++) {
-    let sum = 0, count = 0;
-    for (let j = -windowSize; j <= windowSize; j++) {
-      if (i + j >= 0 && i + j < rowActivity.length) {
-        sum += rowActivity[i + j];
-        count++;
-      }
-    }
-    smoothed.push(sum / count);
-  }
-
-  // Find regions above threshold
-  const maxActivity = Math.max(...smoothed);
-  const threshold = maxActivity * 0.08;
-  const regions = [];
-  let inRegion = false;
-  let regionStart = 0;
-
-  for (let y = 0; y < height; y++) {
-    if (smoothed[y] > threshold && !inRegion) {
-      inRegion = true;
-      regionStart = y;
-    } else if (smoothed[y] <= threshold && inRegion) {
-      inRegion = false;
-      const regionHeight = y - regionStart;
-      if (regionHeight > height * 0.03) { // Minimum 3% of image height
-        regions.push({ y1: regionStart, y2: y, height: regionHeight });
-      }
-    }
-  }
-
-  if (inRegion) {
-    const regionHeight = height - regionStart;
-    if (regionHeight > height * 0.03) {
-      regions.push({ y1: regionStart, y2: height, height: regionHeight });
-    }
-  }
-
-  // Detect layout type: single lead, 4-row (3x4+rhythm), or multiple rows
-  const numRegions = regions.length;
-
-  // Standard 12-lead layout detection
-  if (numRegions >= 3 && numRegions <= 5) {
-    // Likely 3x4 + rhythm strip layout
-    // Row 1: I, aVR, V1, V4
-    // Row 2: II, aVL, V2, V5
-    // Row 3: III, aVF, V3, V6
-    // Row 4: Rhythm strip (usually II)
-
-    // For now, assign based on row position
-    const layoutMap = [
-      ['I', 'aVR', 'V1', 'V4'],
-      ['II', 'aVL', 'V2', 'V5'],
-      ['III', 'aVF', 'V3', 'V6'],
-      ['II'] // Rhythm strip
-    ];
-
-    regions.forEach((r, i) => {
-      // For standard layouts, use Lead II from row 2 or rhythm strip
-      if (i === 1) r.label = 'II';
-      else if (i === 3) r.label = 'II';
-      else if (i === 0) r.label = 'I';
-      else if (i === 2) r.label = 'III';
-      else r.label = `Lead${i + 1}`;
-    });
-  } else if (numRegions === 1) {
-    // Single lead - assume Lead II
-    regions[0].label = 'II';
-  } else {
-    // Multiple separate leads
-    const leadLabels = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
-    regions.forEach((r, i) => {
-      r.label = leadLabels[i] || `Lead${i + 1}`;
-    });
-  }
-
-  // Store detected colors for trace extraction
-  regions.forEach(r => {
-    r.gridColor = gridColor;
-    r.traceColor = traceColor;
-  });
-
-  return regions;
-}
-
-function extractTraceFromRegion(data, width, height, y1, y2, gridColor, traceColor, watermarkMask) {
-  gridColor = gridColor || 'red';
-  traceColor = traceColor || { type: 'black' };
-  watermarkMask = watermarkMask || null;
-
-  console.log(`[DEBUG] Extracting trace: y1=${y1}, y2=${y2}, grid=${gridColor}, trace=${traceColor.type}`);
-
-  const trace = [];
-  const regionHeight = y2 - y1;
-
-  // SIMPLIFIED APPROACH: Find darkest non-grid pixel in each column
-  // This preserves QRS morphology better than weighted centroid
-  for (let x = 0; x < width; x++) {
-    let bestY = null;
-    let bestScore = -Infinity;
-
-    for (let y = y1; y < y2; y++) {
-      const pixelIdx = y * width + x;
-      const i = pixelIdx * 4;
-      const r = data[i], g = data[i+1], b = data[i+2];
-      const brightness = (r + g + b) / 3;
-
-      // Skip watermark pixels
-      if (watermarkMask && watermarkMask[pixelIdx]) continue;
-
-      // Skip grid pixels (red, pink, orange grid lines)
-      if (gridColor === 'red' && r > 150 && r > g * 1.2 && r > b * 1.2) continue;
-      if (gridColor === 'orange' && r > 150 && g > 100 && b < 100) continue;
-      if (gridColor === 'green' && g > 150 && g > r * 1.2) continue;
-      if (gridColor === 'blue' && b > 150 && b > r * 1.2) continue;
-
-      // Skip light background pixels
-      if (brightness > 200) continue;
-
-      // Score: prefer darker pixels (lower brightness = higher score)
-      const score = 255 - brightness;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestY = y;
-      }
-    }
-
-    trace.push({ x, y: bestY });
-  }
-
-  // Debug: show trace stats before any filtering
-  const validPoints = trace.filter(t => t.y !== null);
-  if (validPoints.length > 0) {
-    const yVals = validPoints.map(t => t.y);
-    const minY = Math.min(...yVals);
-    const maxY = Math.max(...yVals);
-    console.log(`[DEBUG] Raw trace: ${validPoints.length}/${trace.length} valid, Y range: ${minY.toFixed(0)}-${maxY.toFixed(0)} (${maxY-minY}px)`);
-  } else {
-    console.log(`[DEBUG] WARNING: No valid trace points found!`);
-  }
-
-  // MINIMAL FILTERING: Only fill gaps, no smoothing that could remove QRS
-  // Fill gaps using linear interpolation
-  const result = [];
-  for (let i = 0; i < trace.length; i++) {
-    if (trace[i].y !== null) {
-      result.push({ x: trace[i].x, y: trace[i].y });
-    } else {
-      // Find nearest valid points on left and right
-      let left = i - 1;
-      while (left >= 0 && trace[left].y === null) left--;
-
-      let right = i + 1;
-      while (right < trace.length && trace[right].y === null) right++;
-
-      if (left >= 0 && right < trace.length) {
-        // Interpolate
-        const t = (i - left) / (right - left);
-        const interpY = trace[left].y + t * (trace[right].y - trace[left].y);
-        result.push({ x: trace[i].x, y: interpY });
-      } else if (left >= 0) {
-        result.push({ x: trace[i].x, y: trace[left].y });
-      } else if (right < trace.length) {
-        result.push({ x: trace[i].x, y: trace[right].y });
-      } else {
-        result.push({ x: trace[i].x, y: (y1 + y2) / 2 }); // Default to center
-      }
-    }
-  }
-
-  // Debug: show final trace stats
-  const finalYVals = result.map(t => t.y);
-  const finalMinY = Math.min(...finalYVals);
-  const finalMaxY = Math.max(...finalYVals);
-  console.log(`[DEBUG] Final trace: Y range ${finalMinY.toFixed(0)}-${finalMaxY.toFixed(0)} (${(finalMaxY-finalMinY).toFixed(0)}px)`);
-
-  return result;
-}
-
-function resampleSignal(signal, targetLength) {
-  if (signal.length === targetLength) return signal;
-
-  const result = new Array(targetLength);
-  const ratio = signal.length / targetLength;
-
-  for (let i = 0; i < targetLength; i++) {
-    const srcIdx = i * ratio;
-    const srcIdxFloor = Math.floor(srcIdx);
-    const srcIdxCeil = Math.min(srcIdxFloor + 1, signal.length - 1);
-    const t = srcIdx - srcIdxFloor;
-
-    result[i] = Math.round(signal[srcIdxFloor] * (1 - t) + signal[srcIdxCeil] * t);
-  }
-
-  return result;
-}
-
-function smoothSignal(signal, windowSize) {
-  const result = new Array(signal.length);
-  const halfWindow = Math.floor(windowSize / 2);
-
-  for (let i = 0; i < signal.length; i++) {
-    let sum = 0;
-    let count = 0;
-
-    for (let j = -halfWindow; j <= halfWindow; j++) {
-      const idx = i + j;
-      if (idx >= 0 && idx < signal.length) {
-        sum += signal[idx];
-        count++;
-      }
-    }
-
-    result[i] = Math.round(sum / count);
-  }
-
-  return result;
 }
 
 window.cancelCalibration = function() {
@@ -4205,5 +4266,90 @@ if (imgParam) {
 }
 
 </script>
+
+<!-- Generate from Image Modal -->
+<div id="generateModal" class="modal-overlay" onclick="closeGenerateModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>Generate Matching ECG</h2>
+      <button class="modal-close" onclick="closeGenerateModal()">&times;</button>
+    </div>
+
+    <div class="modal-preview">
+      <img id="modalPreviewImg" src="" alt="Uploaded ECG">
+      <div class="modal-preview-label">Reference image (for visual comparison)</div>
+    </div>
+
+    <div class="modal-form">
+      <label>
+        What diagnosis do you see?
+        <select id="modalDx">
+          <optgroup label="Normal">
+            <option value="Normal sinus">Normal sinus rhythm</option>
+            <option value="Sinus bradycardia">Sinus bradycardia</option>
+            <option value="Sinus tachycardia">Sinus tachycardia</option>
+          </optgroup>
+          <optgroup label="Conduction">
+            <option value="RBBB">Right bundle branch block (RBBB)</option>
+            <option value="LBBB">Left bundle branch block (LBBB)</option>
+            <option value="LAFB">Left anterior fascicular block</option>
+            <option value="1st degree AVB">1st degree AV block</option>
+            <option value="2nd degree AVB (Wenckebach)">2nd degree AVB (Wenckebach)</option>
+            <option value="2nd degree AVB (Mobitz II)">2nd degree AVB (Mobitz II)</option>
+            <option value="3rd degree AVB">3rd degree (complete) heart block</option>
+          </optgroup>
+          <optgroup label="Pre-excitation">
+            <option value="WPW">Wolff-Parkinson-White (WPW)</option>
+          </optgroup>
+          <optgroup label="Hypertrophy">
+            <option value="LVH">Left ventricular hypertrophy (LVH)</option>
+            <option value="RVH">Right ventricular hypertrophy (RVH)</option>
+          </optgroup>
+          <optgroup label="Tachyarrhythmias">
+            <option value="SVT (narrow)">SVT (narrow complex)</option>
+            <option value="Atrial flutter (2:1)">Atrial flutter (2:1)</option>
+            <option value="Atrial fibrillation">Atrial fibrillation</option>
+          </optgroup>
+          <optgroup label="Ischemia">
+            <option value="STEMI (anterior)">STEMI (anterior)</option>
+          </optgroup>
+          <optgroup label="Repolarization">
+            <option value="Long QT">Long QT syndrome</option>
+            <option value="Pericarditis">Pericarditis</option>
+            <option value="Brugada (Type 1)">Brugada syndrome (Type 1)</option>
+          </optgroup>
+          <optgroup label="Metabolic">
+            <option value="Hyperkalemia">Hyperkalemia</option>
+          </optgroup>
+          <optgroup label="Ectopy">
+            <option value="PACs">Premature atrial contractions (PACs)</option>
+            <option value="PVCs">Premature ventricular contractions (PVCs)</option>
+          </optgroup>
+        </select>
+      </label>
+
+      <label>
+        Estimated patient age
+        <div class="modal-range-row">
+          <input type="range" id="modalAge" min="0" max="99" value="45" oninput="updateModalAgeDisplay()">
+          <span class="modal-range-value" id="modalAgeValue">45 yrs</span>
+        </div>
+        <div class="modal-hr-estimate" id="modalHREstimate">Expected HR: ~70 bpm</div>
+      </label>
+
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeGenerateModal()">Cancel</button>
+        <button class="btn-primary" onclick="digitizeFromModal()" id="digitizeBtn">Digitize ECG</button>
+        <button class="btn-secondary" onclick="generateFromModal()">Generate Synthetic</button>
+      </div>
+
+      <div class="modal-tip" id="modalTip">
+        <strong>Digitize:</strong> Extract the actual waveform from your image (recommended)<br>
+        <strong>Generate:</strong> Create a synthetic ECG with the same diagnosis pattern
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

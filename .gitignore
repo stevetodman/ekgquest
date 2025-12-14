@@ -31,3 +31,4 @@ coverage/
 # Local settings
 .env
 .env.local
+venv/

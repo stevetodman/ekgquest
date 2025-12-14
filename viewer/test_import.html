@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head><title>CSV Import Test</title></head>
+<body>
+<h1>CSV Import Test</h1>
+<p>Loading test CSV...</p>
+<pre id="log"></pre>
+<script>
+const log = msg => {
+  console.log(msg);
+  document.getElementById('log').textContent += msg + '\n';
+};
+
+async function test() {
+  try {
+    // Fetch the test CSV
+    const response = await fetch('/Users/steven/Desktop/test_wpd_ecg.csv');
+
+    // Since we can't fetch local files, let's generate inline
+    log('Generating test ECG data...');
+
+    let csv = 'time,voltage\n';
+    const fs = 500, duration = 10, hr = 75;
+    for (let i = 0; i < fs * duration; i++) {
+      const t = i / fs;
+      let v = 0;
+      const beat_period = 60 / hr;
+      const t_in_beat = t % beat_period;
+
+      // P wave
+      if (t_in_beat > 0.16 && t_in_beat < 0.22) {
+        v += 0.15 * Math.sin((t_in_beat - 0.16) / 0.06 * Math.PI);
+      }
+      // Q wave
+      if (t_in_beat > 0.24 && t_in_beat < 0.26) {
+        v -= 0.1 * Math.sin((t_in_beat - 0.24) / 0.02 * Math.PI);
+      }
+      // R wave
+      if (t_in_beat > 0.26 && t_in_beat < 0.32) {
+        v += 1.2 * Math.sin((t_in_beat - 0.26) / 0.06 * Math.PI);
+      }
+      // S wave
+      if (t_in_beat > 0.32 && t_in_beat < 0.36) {
+        v -= 0.2 * Math.sin((t_in_beat - 0.32) / 0.04 * Math.PI);
+      }
+      // T wave
+      if (t_in_beat > 0.40 && t_in_beat < 0.56) {
+        v += 0.3 * Math.sin((t_in_beat - 0.40) / 0.16 * Math.PI);
+      }
+      csv += t.toFixed(3) + ',' + v.toFixed(3) + '\n';
+    }
+
+    log('Generated ' + (fs * duration) + ' samples');
+    log('Opening main app with test data...');
+
+    // Store in sessionStorage and redirect
+    sessionStorage.setItem('testCSV', csv);
+
+    log('✅ Test data ready');
+    log('');
+    log('Now manually:');
+    log('1. Go to ekgquest_lab.html');
+    log('2. Drag ~/Desktop/test_wpd_ecg.csv onto the page');
+    log('3. Verify ECG displays correctly');
+
+  } catch (err) {
+    log('Error: ' + err.message);
+  }
+}
+
+test();
+</script>
+</body>
+</html>
