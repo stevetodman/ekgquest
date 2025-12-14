@@ -10,11 +10,23 @@ Key improvements:
 
 import numpy as np
 from scipy import ndimage
-from scipy.signal import find_peaks, medfilt
+from scipy.signal import find_peaks, medfilt, butter, filtfilt
 from scipy.interpolate import interp1d
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict
 import warnings
+
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
+try:
+    from skimage.morphology import skeletonize, remove_small_objects
+    HAS_SKIMAGE = True
+except ImportError:
+    HAS_SKIMAGE = False
 
 
 @dataclass
@@ -373,6 +385,165 @@ def extract_trace_viterbi(trace_mask: np.ndarray, y_start: int, y_end: int,
         result = np.pad(result, (0, W - len(result)), mode='edge')
 
     return result[:W]
+
+
+def extract_12lead_skeleton(image: np.ndarray) -> Dict[str, np.ndarray]:
+    """
+    Extract 12 leads from a standard ECG image using skeletonization.
+
+    This improved method uses:
+    1. Color-based trace segmentation (blue, black, or dark traces)
+    2. Morphological cleanup
+    3. Skeletonization for 1-pixel traces
+    4. Row-based lead separation (6 rows x 2 columns)
+    5. Smooth trace following with jump rejection
+
+    Args:
+        image: RGB image array (H, W, 3)
+
+    Returns:
+        Dict mapping lead names to signal arrays (in pixels, inverted)
+    """
+    if not HAS_SKIMAGE:
+        warnings.warn("scikit-image not available, falling back to basic extraction")
+        return {}
+
+    if not HAS_CV2:
+        warnings.warn("opencv-python not available, falling back to basic extraction")
+        return {}
+    h, w = image.shape[:2]
+
+    # Convert to grayscale for some operations
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        R, G, B = image[:,:,0], image[:,:,1], image[:,:,2]
+    else:
+        gray = image
+        R = G = B = gray
+
+    # === TRACE DETECTION ===
+    # Blue traces
+    is_blue = (B > R) & (B > G) & (B > 80)
+
+    # Dark/black traces
+    is_dark = gray < 130
+    is_neutral = (np.abs(R.astype(int) - G.astype(int)) < 50) & \
+                 (np.abs(G.astype(int) - B.astype(int)) < 50)
+    is_black = is_dark & is_neutral
+
+    # Exclude pink/red grid
+    is_pink = (R > 170) & (R > G + 20) & (R > B + 20)
+
+    # Combined trace mask
+    trace_mask = (is_blue | is_black) & ~is_pink
+
+    # Exclude header/footer
+    header_end = int(h * 0.04)
+    footer_start = int(h * 0.97)
+    trace_mask[:header_end, :] = False
+    trace_mask[footer_start:, :] = False
+
+    # === MORPHOLOGICAL CLEANUP ===
+    # Close small gaps
+    kernel = np.ones((2, 2), np.uint8)
+    binary = cv2.morphologyEx(trace_mask.astype(np.uint8) * 255, cv2.MORPH_CLOSE, kernel)
+    binary_bool = binary > 0
+
+    # Remove small noise
+    if np.sum(binary_bool) > 100:
+        binary_clean = remove_small_objects(binary_bool, min_size=8)
+    else:
+        binary_clean = binary_bool
+
+    # === SKELETONIZE ===
+    skeleton = skeletonize(binary_clean)
+
+    # === FIND ACTIVE REGION ===
+    row_sums = np.sum(skeleton, axis=1)
+    active_rows = np.where(row_sums > 3)[0]
+
+    if len(active_rows) == 0:
+        return {}
+
+    y_start = max(active_rows[0] - 5, 0)
+    y_end = min(active_rows[-1] + 5, h)
+    active_height = y_end - y_start
+
+    # === EXTRACT 12 LEADS ===
+    strip_height = active_height // 6
+    mid_x = w // 2
+
+    lead_order = [
+        ('aVL', 0, 'left'), ('I', 0, 'right'),
+        ('aVR', 1, 'left'), ('II', 1, 'right'),
+        ('aVF', 2, 'left'), ('III', 2, 'right'),
+        ('V1', 3, 'left'), ('V2', 3, 'right'),
+        ('V3', 4, 'left'), ('V4', 4, 'right'),
+        ('V5', 5, 'left'), ('V6', 5, 'right'),
+    ]
+
+    leads = {}
+
+    for lead_name, row_idx, side in lead_order:
+        strip_y_start = y_start + row_idx * strip_height
+        strip_y_end = strip_y_start + strip_height
+        strip_skeleton = skeleton[strip_y_start:strip_y_end, :]
+
+        x_start = 0 if side == 'left' else mid_x
+        x_end = mid_x if side == 'left' else w
+        region = strip_skeleton[:, x_start:x_end]
+        region_w = x_end - x_start
+
+        # Extract signal with smooth trace following
+        signal_pts = []
+        x_coords = []
+
+        for x in range(region_w):
+            col = region[:, x]
+            trace_ys = np.where(col)[0]
+            if len(trace_ys) > 0:
+                y = trace_ys[len(trace_ys)//2]  # Middle point
+                signal_pts.append(y)
+                x_coords.append(x)
+
+        if len(signal_pts) < 20:
+            continue
+
+        signal_pts = np.array(signal_pts, dtype=float)
+        x_coords = np.array(x_coords)
+
+        # Reject sudden jumps (likely grid line artifacts)
+        max_jump = strip_height * 0.15
+        smoothed = [signal_pts[0]]
+        for i in range(1, len(signal_pts)):
+            jump = abs(signal_pts[i] - smoothed[-1])
+            if jump < max_jump:
+                smoothed.append(signal_pts[i])
+            else:
+                step = np.sign(signal_pts[i] - smoothed[-1]) * min(jump * 0.3, max_jump * 0.5)
+                smoothed.append(smoothed[-1] + step)
+        smoothed = np.array(smoothed)
+
+        # Interpolate to full width
+        f = interp1d(x_coords, smoothed, kind='linear',
+                    bounds_error=False, fill_value='extrapolate')
+        full_sig = f(np.arange(region_w))
+
+        # Smooth with median filter and light gaussian
+        full_sig = medfilt(full_sig, kernel_size=5)
+        full_sig = ndimage.gaussian_filter1d(full_sig, sigma=1.5)
+
+        # Invert y-axis (image y increases downward)
+        full_sig = strip_height - full_sig
+
+        # Trim edges (often have artifacts)
+        trim = int(region_w * 0.03)
+        if trim > 0 and len(full_sig) > 2 * trim:
+            full_sig = full_sig[trim:-trim]
+
+        leads[lead_name] = full_sig
+
+    return leads
 
 
 def extract_signal(
