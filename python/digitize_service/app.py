@@ -93,6 +93,11 @@ def digitize():
     try:
         # Load image
         image_file = request.files['image']
+
+        # Read raw bytes for potential Claude vision fallback
+        image_bytes = image_file.read()
+        image_file.seek(0)  # Reset for PIL
+
         image = Image.open(image_file)
 
         # Convert to RGB if necessary (handles PNG with alpha, etc.)
@@ -124,7 +129,8 @@ def digitize():
             paper_speed_mm_s=paper_speed,
             voltage_scale_mm_mV=voltage_scale,
             target_fs=500,
-            lead_hint=lead_hint
+            lead_hint=lead_hint,
+            image_bytes=image_bytes
         )
 
         processing_time = (time.time() - start_time) * 1000

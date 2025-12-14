@@ -33,8 +33,10 @@ def detect_trace_pixels_color(image: np.ndarray) -> np.ndarray:
     """
     Detect ECG trace pixels using color information.
 
-    ECG traces are typically BLACK lines on a PINK/RED grid.
-    This is much more robust than simple thresholding.
+    ECG traces can be:
+    - BLACK lines on a PINK/RED grid (most common)
+    - BLUE lines on a PINK/RED grid (also common)
+    - GREEN lines (less common)
 
     Args:
         image: RGB image array (H, W, 3)
@@ -53,26 +55,34 @@ def detect_trace_pixels_color(image: np.ndarray) -> np.ndarray:
     # Calculate metrics
     brightness = (R + G + B) / 3
 
-    # Grid pixels are PINK/RED: high R relative to G and B
-    # Trace pixels are BLACK/DARK GRAY: low R, G, B and balanced
-
-    # Method 1: Find very dark pixels (trace is black)
+    # === Method 1: Black/dark traces ===
+    # Very dark pixels (trace is black)
     is_dark = brightness < 80
 
-    # Method 2: Find non-red dark pixels (exclude dark red grid lines)
-    # True black has R ≈ G ≈ B
+    # Non-red dark pixels (exclude dark red grid lines)
     color_balance = np.abs(R - G) + np.abs(G - B) + np.abs(R - B)
     is_neutral = color_balance < 60  # Neutral colors (black, gray, white)
-
-    # Method 3: Specifically exclude pink/red (grid color)
     is_not_pink = ~((R > G + 20) & (R > B + 20))
+    black_trace = is_dark & (is_neutral | is_not_pink)
 
-    # Combine: dark AND (neutral OR not pink)
-    trace_mask = is_dark & (is_neutral | is_not_pink)
+    # === Method 2: Blue traces ===
+    # Blue traces have high B, low R and G (e.g., R=60, G=60, B=250)
+    is_blue = (B > R * 1.5) & (B > G * 1.2) & (B > 150)
+
+    # Also catch darker blues
+    is_dark_blue = (B > R) & (B > G) & (R < 120) & (G < 120) & (B > 100)
+
+    blue_trace = is_blue | is_dark_blue
+
+    # === Method 3: Green traces (less common) ===
+    is_green = (G > R * 1.3) & (G > B * 1.3) & (G > 100)
+    green_trace = is_green
+
+    # Combine all trace types
+    trace_mask = black_trace | blue_trace | green_trace
 
     # Clean up: remove isolated pixels (noise)
-    # Use morphological opening
-    from scipy.ndimage import binary_opening, binary_closing
+    from scipy.ndimage import binary_opening
     struct = np.ones((2, 2))
     trace_mask = binary_opening(trace_mask, structure=struct)
 
@@ -370,7 +380,8 @@ def extract_signal(
     paper_speed_mm_s: float = 25.0,
     voltage_scale_mm_mV: float = 10.0,
     target_fs: int = 500,
-    lead_hint: str = "II"
+    lead_hint: str = "II",
+    image_bytes: Optional[bytes] = None
 ) -> ExtractionResult:
     """
     Full extraction pipeline: image → calibrated ECG signal.
@@ -381,17 +392,41 @@ def extract_signal(
         voltage_scale_mm_mV: Voltage scale (default 10 mm/mV)
         target_fs: Output sample rate
         lead_hint: Expected lead name
+        image_bytes: Raw image bytes for Claude vision fallback
 
     Returns:
         ExtractionResult with signal in microvolts
     """
     H, W = image.shape[:2]
+    method = "viterbi_color"
 
     # Step 1: Detect trace pixels using color
     trace_mask = detect_trace_pixels_color(image)
 
     trace_pixel_count = np.sum(trace_mask)
     print(f"Detected {trace_pixel_count} trace pixels ({100*trace_pixel_count/(H*W):.1f}% of image)")
+
+    # Step 1b: If detection is poor, try Claude vision fallback
+    if trace_pixel_count < 500 and image_bytes is not None:
+        print("Low trace detection - trying Claude vision fallback...")
+        try:
+            from .vision import identify_trace_colors, create_color_mask
+
+            color_info = identify_trace_colors(image_bytes)
+            if color_info and color_info.colors:
+                print(f"Claude identified colors: {color_info.color_names} (confidence: {color_info.confidence:.2f})")
+
+                # Create mask from identified colors
+                vision_mask = create_color_mask(image, color_info.colors, tolerance=60)
+                vision_pixel_count = np.sum(vision_mask)
+
+                if vision_pixel_count > trace_pixel_count:
+                    print(f"Vision mask has {vision_pixel_count} pixels (vs {trace_pixel_count})")
+                    trace_mask = vision_mask
+                    trace_pixel_count = vision_pixel_count
+                    method = "viterbi_vision"
+        except Exception as e:
+            print(f"Claude vision fallback failed: {e}")
 
     if trace_pixel_count < 100:
         warnings.warn("Very few trace pixels detected")
@@ -495,7 +530,7 @@ def extract_signal(
         duration_s=duration_s,
         quality_score=quality_score,
         grid_spacing_px=grid_spacing_px,
-        method="viterbi_color"
+        method=method
     )
 
 
