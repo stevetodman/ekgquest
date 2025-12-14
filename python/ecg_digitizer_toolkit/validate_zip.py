@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
-"""
-Validate an ECGZIP package for structure, checksums, and basic signal sanity.
+"""ecg-digitizer: ECGZIP validator
+
+Validate the internal consistency of an ECGZIP package.
+
+Checks:
+  - required files present
+  - metadata.json is parseable
+  - optional checksum verification (if checksums_sha256 present)
+  - CSV columns, monotonic time, approximate sampling rate
 
 Usage:
   python validate_zip.py --zip out.ecgzip.zip
@@ -16,7 +23,7 @@ import io
 import json
 import sys
 import zipfile
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,13 +35,13 @@ REQUIRED_FILES = [
     "metadata.json",
 ]
 
-LEADS_12 = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+LEADS_12 = ["I","II","III","aVR","aVL","aVF","V1","V2","V3","V4","V5","V6"]
 
 
 def sha256_bytes(data: bytes) -> str:
-    hsh = hashlib.sha256()
-    hsh.update(data)
-    return hsh.hexdigest()
+    h = hashlib.sha256()
+    h.update(data)
+    return h.hexdigest()
 
 
 def fail(msg: str) -> None:
@@ -64,7 +71,8 @@ def validate_csv_segments(df: pd.DataFrame, strict: bool) -> List[str]:
         errors.append("segments CSV missing column: time_s")
         return errors
 
-    missing = [f"{lead}_mV" for lead in LEADS_12 if f"{lead}_mV" not in df.columns]
+    # Lead columns
+    missing = [f"{ld}_mV" for ld in LEADS_12 if f"{ld}_mV" not in df.columns]
     if missing:
         msg = f"segments CSV missing lead columns: {', '.join(missing)}"
         if strict:
@@ -98,25 +106,26 @@ def validate_csv_rhythm(df: pd.DataFrame) -> List[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--zip", required=True, help="Input ECGZIP package (ZIP)")
-    parser.add_argument("--strict", action="store_true", help="Fail if schema/version/columns not as expected")
-    parser.add_argument("--require-checksums", action="store_true", help="Fail if checksums_sha256 missing")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--zip", required=True, help="Input ECGZIP package (ZIP)")
+    p.add_argument("--strict", action="store_true", help="Fail if schema/version/columns not as expected")
+    p.add_argument("--require-checksums", action="store_true", help="Fail if checksums_sha256 missing")
+    args = p.parse_args()
 
     errors: List[str] = []
-    with zipfile.ZipFile(args.zip, "r") as zf:
-        names = set(zf.namelist())
-        for required in REQUIRED_FILES:
-            if required not in names:
-                errors.append(f"missing required file: {required}")
+    with zipfile.ZipFile(args.zip, "r") as z:
+        names = set(z.namelist())
+        for f in REQUIRED_FILES:
+            if f not in names:
+                errors.append(f"missing required file: {f}")
 
         if errors:
-            for err in errors:
-                fail(err)
+            for e in errors:
+                fail(e)
             return 2
 
-        meta = json.loads(zf.read("metadata.json"))
+        meta = json.loads(z.read("metadata.json"))
+
         schema_version = meta.get("schema_version")
         if schema_version is None:
             if args.strict:
@@ -134,20 +143,24 @@ def main() -> int:
             else:
                 warn("metadata missing checksums_sha256 (cannot verify file integrity)")
         else:
+            # Verify all listed checksums
             for fname, expected in checksums.items():
                 if fname not in names:
                     errors.append(f"checksum entry references missing file: {fname}")
                     continue
-                actual = sha256_bytes(zf.read(fname))
+                actual = sha256_bytes(z.read(fname))
                 if actual.lower() != str(expected).lower():
                     errors.append(f"checksum mismatch for {fname}: expected {expected}, got {actual}")
 
-        seg_df = pd.read_csv(io.BytesIO(zf.read("ecg_12lead_segments_2p5s_500Hz.csv")))
-        rhy_df = pd.read_csv(io.BytesIO(zf.read("ecg_leadII_rhythm_10s_500Hz.csv")))
+        # Load CSVs
+        seg_df = pd.read_csv(io.BytesIO(z.read("ecg_12lead_segments_2p5s_500Hz.csv")))
+        rhy_df = pd.read_csv(io.BytesIO(z.read("ecg_leadII_rhythm_10s_500Hz.csv")))
 
+    # Validate content
     errors.extend(validate_csv_segments(seg_df, strict=args.strict))
     errors.extend(validate_csv_rhythm(rhy_df))
 
+    # Sampling rates / durations (informational; strict tolerances if strict)
     seg_t = seg_df["time_s"].to_numpy(dtype=float) if "time_s" in seg_df.columns else np.array([])
     rhy_t = rhy_df["time_s"].to_numpy(dtype=float) if "time_s" in rhy_df.columns else np.array([])
     seg_fs = infer_fs(seg_t) if seg_t.size else float("nan")
@@ -155,18 +168,19 @@ def main() -> int:
     seg_dur = float(seg_t[-1] - seg_t[0]) if seg_t.size >= 2 else float("nan")
     rhy_dur = float(rhy_t[-1] - rhy_t[0]) if rhy_t.size >= 2 else float("nan")
 
-    print(f"segments: n={len(seg_df):d}, duration_s={seg_dur:.3f}, fs_hz~{seg_fs:.2f}")
-    print(f"rhythm  : n={len(rhy_df):d}, duration_s={rhy_dur:.3f}, fs_hz~{rhy_fs:.2f}")
+    print(f"segments: n={len(seg_df):d}, duration_s={seg_dur:.3f}, fs_hz≈{seg_fs:.2f}")
+    print(f"rhythm  : n={len(rhy_df):d}, duration_s={rhy_dur:.3f}, fs_hz≈{rhy_fs:.2f}")
 
     if args.strict:
+        # Require fs roughly around 500 Hz (±5%) if strict and finite
         if np.isfinite(seg_fs) and not (475.0 <= seg_fs <= 525.0):
             errors.append(f"segments fs_hz not ~500 (got {seg_fs:.2f})")
         if np.isfinite(rhy_fs) and not (475.0 <= rhy_fs <= 525.0):
             errors.append(f"rhythm fs_hz not ~500 (got {rhy_fs:.2f})")
 
     if errors:
-        for err in errors:
-            fail(err)
+        for e in errors:
+            fail(e)
         return 2
 
     print("OK: ECGZIP package is valid.")

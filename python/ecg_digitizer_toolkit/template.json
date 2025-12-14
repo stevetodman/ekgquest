@@ -1,0 +1,116 @@
+{
+  "name": "example_ge_3x4_longII_template",
+  "calibration": {
+    "speed_mm_per_s": 25.0,
+    "gain_mm_per_mV": 10.0
+  },
+  "lead_layout_on_print": {
+    "row1": [
+      "I",
+      "aVR",
+      "V1",
+      "V4"
+    ],
+    "row2": [
+      "II",
+      "aVL",
+      "V2",
+      "V5"
+    ],
+    "row3": [
+      "III",
+      "aVF",
+      "V3",
+      "V6"
+    ],
+    "row4": [
+      "II_rhythm"
+    ]
+  },
+  "px_per_mm": null,
+  "crops": {
+    "I": [
+      0.0,
+      0.0,
+      0.25,
+      0.23
+    ],
+    "II": [
+      0.0,
+      0.23,
+      0.25,
+      0.46
+    ],
+    "III": [
+      0.0,
+      0.46,
+      0.25,
+      0.69
+    ],
+    "aVR": [
+      0.25,
+      0.0,
+      0.5,
+      0.23
+    ],
+    "aVL": [
+      0.25,
+      0.23,
+      0.5,
+      0.46
+    ],
+    "aVF": [
+      0.25,
+      0.46,
+      0.5,
+      0.69
+    ],
+    "V1": [
+      0.5,
+      0.0,
+      0.75,
+      0.23
+    ],
+    "V2": [
+      0.5,
+      0.23,
+      0.75,
+      0.46
+    ],
+    "V3": [
+      0.5,
+      0.46,
+      0.75,
+      0.69
+    ],
+    "V4": [
+      0.75,
+      0.0,
+      1.0,
+      0.23
+    ],
+    "V5": [
+      0.75,
+      0.23,
+      1.0,
+      0.46
+    ],
+    "V6": [
+      0.75,
+      0.46,
+      1.0,
+      0.69
+    ]
+  },
+  "rhythm_crop": [
+    0.0,
+    0.69,
+    1.0,
+    1.0
+  ],
+  "notes": [
+    "This is a generic normalized-crop template for a 3x4 + long Lead II layout.",
+    "You MUST adjust these crop boxes to match your specific scan margins and lead boundaries.",
+    "For best results, create a template per ECG print style and scan resolution."
+  ]
+}

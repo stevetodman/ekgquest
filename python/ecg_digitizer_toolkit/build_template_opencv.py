@@ -1,89 +1,136 @@
 #!/usr/bin/env python3
 """
-Interactive template builder for ECG digitization (OpenCV ROI selection).
+Interactive template builder (OpenCV GUI)
 
-This helps you create a template JSON with normalized crop boxes for each lead panel.
+This helps you create the normalized crop boxes needed by digitize_from_image.py.
+
+You will be prompted to draw rectangles (drag mouse) for each lead panel in order:
+  I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6, and the long rhythm strip (Lead II).
+
+Controls:
+  - Click and drag to draw a rectangle.
+  - Press 'c' to confirm the current rectangle and move to the next panel.
+  - Press 'r' to reset the current rectangle.
+  - Press 'q' to quit (template written with completed boxes).
 
 Usage:
   python build_template_opencv.py --image scan.png --out template.json
 
-Workflow:
-  - The script will ask you to select ROIs in order for all panels:
-    I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6, II_rhythm
-  - Use the mouse to draw a rectangle for each panel in that order.
-  - Press ENTER/SPACE after the last ROI to accept.
-  - The template JSON will be written to --out with normalized [x0,y0,x1,y1] boxes.
+Notes:
+  - Requires a desktop environment (won't work in headless servers without display forwarding).
+  - The output crop boxes are normalized to [0..1] relative to image width/height.
 """
-
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+from typing import Dict, Tuple, Optional
 
 import cv2
 import numpy as np
 
 
-LEAD_ORDER = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6", "II_rhythm"]
+LEADS = ["I","II","III","aVR","aVL","aVF","V1","V2","V3","V4","V5","V6"]
+RHYTHM_NAME = "II_rhythm"
 
 
-def build_template(image_path: str, out_path: str, speed: float, gain: float, name: str | None) -> None:
-    bgr = cv2.imread(image_path)
-    if bgr is None:
-        raise FileNotFoundError(image_path)
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--image", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--speed", type=float, default=25.0, help="mm/s")
+    p.add_argument("--gain", type=float, default=10.0, help="mm/mV")
+    args = p.parse_args()
 
-    prompt = (
-        "Select ROIs in this order (press ENTER or SPACE after the last one):\n"
-        + ", ".join(LEAD_ORDER)
-        + "\nUse 'c' to cancel/clear selections."
-    )
-    print(prompt)
-    rois = cv2.selectROIs("ECG template builder", bgr, showCrosshair=True, fromCenter=False)
-    cv2.destroyAllWindows()
+    img_bgr = cv2.imread(args.image, cv2.IMREAD_COLOR)
+    if img_bgr is None:
+        raise FileNotFoundError(args.image)
+    h, w = img_bgr.shape[:2]
 
-    if rois is None or len(rois) != len(LEAD_ORDER):
-        raise RuntimeError(f"Expected {len(LEAD_ORDER)} ROIs, got {len(rois) if rois is not None else 0}")
-
-    hgt, wid = bgr.shape[:2]
-    boxes = []
-    for (x, y, w, h) in rois:
-        x0 = x / wid
-        y0 = y / hgt
-        x1 = (x + w) / wid
-        y1 = (y + h) / hgt
-        boxes.append([float(x0), float(y0), float(x1), float(y1)])
-
-    crops = {lead: box for lead, box in zip(LEAD_ORDER, boxes)}
-    rhythm = crops.pop("II_rhythm")
-
-    tpl = {
-        "name": name or Path(out_path).stem,
-        "calibration": {"speed_mm_per_s": float(speed), "gain_mm_per_mV": float(gain)},
-        "crops": crops,
-        "rhythm_crop": rhythm,
-        "lead_layout_on_print": {
-            "row1": ["I", "aVR", "V1", "V4"],
-            "row2": ["II", "aVL", "V2", "V5"],
-            "row3": ["III", "aVF", "V3", "V6"],
-            "row4": ["II_rhythm"],
-        },
+    state = {
+        "drawing": False,
+        "ix": 0, "iy": 0,
+        "x0": 0, "y0": 0, "x1": 0, "y1": 0,
+        "rect": None,  # (x0,y0,x1,y1) in pixels
     }
 
-    Path(out_path).write_text(json.dumps(tpl, indent=2))
-    print(f"Wrote template to {out_path}")
+    order = LEADS + [RHYTHM_NAME]
+    crops: Dict[str, Tuple[float,float,float,float]] = {}
+    idx = 0
 
+    def draw_overlay(frame):
+        frame2 = frame.copy()
+        label = order[idx]
+        cv2.putText(frame2, f"Draw box for: {label}  (c=confirm, r=reset, q=quit)", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,0), 3, cv2.LINE_AA)
+        cv2.putText(frame2, f"Draw box for: {label}  (c=confirm, r=reset, q=quit)", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 1, cv2.LINE_AA)
+        if state["rect"] is not None:
+            x0,y0,x1,y1 = state["rect"]
+            cv2.rectangle(frame2, (x0,y0), (x1,y1), (0,255,0), 2)
+        return frame2
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--image", required=True, help="ECG scan/photo to sample crop boxes from")
-    parser.add_argument("--out", required=True, help="Output template JSON path")
-    parser.add_argument("--speed", type=float, default=25.0, help="Paper speed (mm/s)")
-    parser.add_argument("--gain", type=float, default=10.0, help="Gain (mm/mV)")
-    parser.add_argument("--name", type=str, default=None, help="Optional template name")
-    args = parser.parse_args()
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            state["drawing"] = True
+            state["ix"], state["iy"] = x, y
+            state["rect"] = (x, y, x, y)
+        elif event == cv2.EVENT_MOUSEMOVE and state["drawing"]:
+            x0,y0 = state["ix"], state["iy"]
+            state["rect"] = (min(x0,x), min(y0,y), max(x0,x), max(y0,y))
+        elif event == cv2.EVENT_LBUTTONUP:
+            state["drawing"] = False
+            x0,y0 = state["ix"], state["iy"]
+            state["rect"] = (min(x0,x), min(y0,y), max(x0,x), max(y0,y))
 
-    build_template(args.image, args.out, speed=args.speed, gain=args.gain, name=args.name)
+    win = "ECG Template Builder"
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(win, mouse_cb)
+
+    while True:
+        frame = draw_overlay(img_bgr)
+        cv2.imshow(win, frame)
+        k = cv2.waitKey(10) & 0xFF
+
+        if k == ord('r'):
+            state["rect"] = None
+        elif k == ord('c'):
+            if state["rect"] is None:
+                continue
+            x0,y0,x1,y1 = state["rect"]
+            # normalize
+            box = (x0 / w, y0 / h, x1 / w, y1 / h)
+            crops[order[idx]] = box
+            idx += 1
+            state["rect"] = None
+            if idx >= len(order):
+                break
+        elif k == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
+    tpl = {
+        "name": "custom_template",
+        "calibration": {"speed_mm_per_s": args.speed, "gain_mm_per_mV": args.gain},
+        "lead_layout_on_print": {
+            "row1": ["I","aVR","V1","V4"],
+            "row2": ["II","aVL","V2","V5"],
+            "row3": ["III","aVF","V3","V6"],
+            "row4": ["II_rhythm"]
+        },
+        "px_per_mm": None,
+        "crops": {k: v for k, v in crops.items() if k in LEADS},
+        "rhythm_crop": crops.get(RHYTHM_NAME, None),
+        "notes": [
+            "Created with build_template_opencv.py",
+            "Normalized crops are relative to the original image size."
+        ]
+    }
+
+    Path(args.out).write_text(json.dumps(tpl, indent=2))
+    print(f"Wrote template: {args.out}")
 
 
 if __name__ == "__main__":
