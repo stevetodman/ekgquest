@@ -1005,7 +1005,7 @@ import {
   physicsChecks, detectRPeaks,
   buildMedianBeat, fiducialsFromMedian, buildFullFiducialsFromMedian,
   computeAxesFromMedian, computeGlobalMeasurements
-} from "/viewer/js/ecg-core.js";
+} from "./js/ecg-core.js";
 
 // Will be imported dynamically when synthesizer is used
 let synthModule = null;
@@ -1545,7 +1545,7 @@ window.clearReference = function() {
 
 async function ensureSynth() {
   if (!synthModule) {
-    synthModule = await import("/viewer/js/ecg-synth-modules.js");
+   synthModule = await import("./js/ecg-synth-modules.js");
   }
   return synthModule;
 }
